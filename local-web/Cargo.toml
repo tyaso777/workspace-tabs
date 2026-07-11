@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/tyaso777/workspace-tabs"
 
 [dependencies]
-axum = "0.7.9"
+axum = "0.8.9"
 explorer-core = { path = "../explorer-core" }
 explorer-view-model = { path = "../explorer-view-model" }
 futures-util = "0.3.32"
