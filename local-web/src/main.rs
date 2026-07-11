@@ -467,6 +467,17 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
                 .map_err(err)?;
             Ok(Value::Null)
         }
+        "load_project_custom_order" => to_value(
+            lock(&state.store)?
+                .load_project_custom_order()
+                .map_err(err)?,
+        ),
+        "save_project_custom_order" => {
+            lock(&state.store)?
+                .save_project_custom_order(&u64_vec_arg(&args, "projectIds")?)
+                .map_err(err)?;
+            Ok(Value::Null)
+        }
         "load_sidebar_collapsed" => {
             to_value(lock(&state.store)?.load_sidebar_collapsed().map_err(err)?)
         }
@@ -679,7 +690,10 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
                 .map(TabId::from_value)
                 .collect::<Vec<_>>();
             workspace
-                .delete_tabs(ProjectId::from_value(u64_arg(&args, "projectId")?), &tab_ids)
+                .delete_tabs(
+                    ProjectId::from_value(u64_arg(&args, "projectId")?),
+                    &tab_ids,
+                )
                 .map_err(err)
         }),
         "undo_last" => mutate_workspace(state, |workspace| {
@@ -1191,12 +1205,8 @@ mod tests {
     fn local_web_html_has_an_explicit_runtime_marker_and_token() {
         let html = inject_local_web_config("<html><head></head></html>", "secret");
 
-        assert!(html.contains(
-            "<meta name=\"workspace-tabs-runtime\" content=\"local-web\" />"
-        ));
-        assert!(html.contains(
-            "<meta name=\"workspace-tabs-token\" content=\"secret\" />"
-        ));
+        assert!(html.contains("<meta name=\"workspace-tabs-runtime\" content=\"local-web\" />"));
+        assert!(html.contains("<meta name=\"workspace-tabs-token\" content=\"secret\" />"));
     }
 
     #[tokio::test(start_paused = true)]

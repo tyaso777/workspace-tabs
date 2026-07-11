@@ -136,6 +136,29 @@ fn save_project_sort_mode(state: State<'_, AppState>, mode: String) -> Result<()
 }
 
 #[tauri::command]
+fn load_project_custom_order(state: State<'_, AppState>) -> Result<Vec<u64>, String> {
+    state
+        .store
+        .lock()
+        .map_err(|error| error.to_string())?
+        .load_project_custom_order()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_project_custom_order(
+    state: State<'_, AppState>,
+    project_ids: Vec<u64>,
+) -> Result<(), String> {
+    state
+        .store
+        .lock()
+        .map_err(|error| error.to_string())?
+        .save_project_custom_order(&project_ids)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn load_sidebar_collapsed(state: State<'_, AppState>) -> Result<bool, String> {
     state
         .store
@@ -602,7 +625,10 @@ fn delete_tabs(
     tab_ids: Vec<u64>,
 ) -> Result<WorkspaceDto, String> {
     let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
-    let tab_ids = tab_ids.into_iter().map(TabId::from_value).collect::<Vec<_>>();
+    let tab_ids = tab_ids
+        .into_iter()
+        .map(TabId::from_value)
+        .collect::<Vec<_>>();
     workspace
         .delete_tabs(ProjectId::from_value(project_id), &tab_ids)
         .map_err(|error| error.to_string())?;
@@ -647,7 +673,10 @@ fn move_tabs(
     target_index: usize,
 ) -> Result<WorkspaceDto, String> {
     let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
-    let tab_ids = tab_ids.into_iter().map(TabId::from_value).collect::<Vec<_>>();
+    let tab_ids = tab_ids
+        .into_iter()
+        .map(TabId::from_value)
+        .collect::<Vec<_>>();
     workspace
         .move_tabs(ProjectId::from_value(project_id), &tab_ids, target_index)
         .map_err(|error| error.to_string())?;
@@ -898,6 +927,8 @@ pub fn run() {
             save_window_height,
             load_project_sort_mode,
             save_project_sort_mode,
+            load_project_custom_order,
+            save_project_custom_order,
             load_sidebar_collapsed,
             save_sidebar_collapsed,
             load_notes_expanded,

@@ -75,7 +75,8 @@ C:\Users\<UserName>\AppData\Roaming\local.workspace.tabs\workspace.sqlite3
 
 ## 主な機能
 
-- Projectの作成、編集、並び替え、複数選択、一括削除、Undo
+- Projectの作成、編集、Custom／Created／Name順の切り替え、複数選択、一括削除、Undo
+- 既定のCustom順ではProjectをドラッグして並び替え可能（複数選択時はまとめて移動）
 - Projectごとの複数Note、Title／Content編集、複数選択、一括削除
 - Projectごとの複数Tabとドラッグ並び替え
 - Tabごとのフォルダ割り当て

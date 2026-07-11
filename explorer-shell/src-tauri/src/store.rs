@@ -209,8 +209,17 @@ impl SqliteWorkspaceStore {
     pub fn load_project_sort_mode(&self) -> Result<String, StoreError> {
         Ok(self
             .load_app_state_value("project_sort_mode")?
-            .filter(|value| value == "name")
-            .unwrap_or_else(|| "created".to_string()))
+            .filter(|value| value == "created" || value == "name")
+            .unwrap_or_else(|| "custom".to_string()))
+    }
+
+    pub fn load_project_custom_order(&self) -> Result<Vec<u64>, StoreError> {
+        Ok(self
+            .load_app_state_value("project_custom_order")?
+            .unwrap_or_default()
+            .split(',')
+            .filter_map(|value| value.parse::<u64>().ok())
+            .collect())
     }
 
     pub fn load_sidebar_collapsed(&self) -> Result<bool, StoreError> {
@@ -246,11 +255,29 @@ impl SqliteWorkspaceStore {
     }
 
     pub fn save_project_sort_mode(&mut self, mode: &str) -> Result<(), StoreError> {
-        let mode = if mode == "name" { "name" } else { "created" };
+        let mode = if mode == "created" || mode == "name" {
+            mode
+        } else {
+            "custom"
+        };
         self.conn.execute(
             "INSERT INTO app_state (key, value) VALUES ('project_sort_mode', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             params![mode],
+        )?;
+        Ok(())
+    }
+
+    pub fn save_project_custom_order(&mut self, project_ids: &[u64]) -> Result<(), StoreError> {
+        let value = project_ids
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        self.conn.execute(
+            "INSERT INTO app_state (key, value) VALUES ('project_custom_order', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![value],
         )?;
         Ok(())
     }
@@ -1009,14 +1036,23 @@ mod tests {
     }
 
     #[test]
-    fn project_sort_mode_defaults_to_created_and_rejects_unknown_values() {
+    fn project_sort_mode_defaults_to_custom_and_rejects_unknown_values() {
         let mut store = SqliteWorkspaceStore::in_memory().unwrap();
 
-        assert_eq!(store.load_project_sort_mode().unwrap(), "created");
+        assert_eq!(store.load_project_sort_mode().unwrap(), "custom");
 
         store.save_project_sort_mode("recent").unwrap();
 
-        assert_eq!(store.load_project_sort_mode().unwrap(), "created");
+        assert_eq!(store.load_project_sort_mode().unwrap(), "custom");
+    }
+
+    #[test]
+    fn project_custom_order_round_trips() {
+        let mut store = SqliteWorkspaceStore::in_memory().unwrap();
+
+        store.save_project_custom_order(&[4, 2, 9]).unwrap();
+
+        assert_eq!(store.load_project_custom_order().unwrap(), vec![4, 2, 9]);
     }
 
     #[test]

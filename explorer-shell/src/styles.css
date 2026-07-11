@@ -669,7 +669,7 @@ button.is-active {
 
 .project-sort-control {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 0;
 }
 
@@ -684,12 +684,16 @@ button.is-active {
   border-radius: 6px 0 0 6px;
 }
 
-.project-sort-control button:last-child {
+.project-sort-control button + button {
   margin-left: -1px;
+}
+
+.project-sort-control button:last-child {
   border-radius: 0 6px 6px 0;
 }
 
 .project-item {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 22px 30px;
   grid-template-rows: auto auto;
@@ -808,6 +812,35 @@ button.is-active {
 
 .project-item.is-active span {
   color: #425466;
+}
+
+.project-item.is-custom-sort {
+  cursor: grab;
+  user-select: none;
+}
+
+.project-item.is-dragging {
+  opacity: 0.55;
+  cursor: grabbing;
+}
+
+.project-item.is-drop-before::before,
+.project-item.is-drop-after::after {
+  position: absolute;
+  right: 4px;
+  left: 4px;
+  height: 3px;
+  content: "";
+  border-radius: 2px;
+  background: #24708d;
+}
+
+.project-item.is-drop-before::before {
+  top: -5px;
+}
+
+.project-item.is-drop-after::after {
+  bottom: -5px;
 }
 
 .project-context-menu {

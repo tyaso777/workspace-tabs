@@ -34,8 +34,14 @@ import {
   type FolderChangedPayload,
 } from "./folderWatch";
 import {
+  initialProjectPointerState,
+  moveProjectsInCustomOrder,
+  normalizeProjectCustomOrder,
   normalizeProjectSortMode,
   sortProjectsForDisplay,
+  startProjectPointerDrag,
+  updateProjectPointerDrag,
+  type ProjectPointerState,
   type ProjectSortMode,
 } from "./projectSort";
 import {
@@ -211,7 +217,11 @@ let projectEditSurface: "active-header" | "project-list" = "active-header";
 let tabNameEditSurface: "tab-bar" | "active-header" = "tab-bar";
 let tabPointerState: TabPointerState = initialTabPointerState();
 let fileSelectionState: FileSelectionState = initialFileSelectionState();
-let projectSortMode: ProjectSortMode = "created";
+let projectSortMode: ProjectSortMode = "custom";
+let projectCustomOrder: number[] = [];
+let projectPointerState: ProjectPointerState = initialProjectPointerState();
+let draggedProjectIds: number[] = [];
+let suppressProjectClick = false;
 let sidebarCollapsed = false;
 let notesExpanded = false;
 let projectSelection: MultiSelectionState = emptyMultiSelection();
@@ -246,6 +256,7 @@ const projectNameInput = element<HTMLInputElement>("#project-name");
 const projectSummaryInput = element<HTMLInputElement>("#project-summary");
 const projectList = element<HTMLElement>("#project-list");
 const sidebarToggleButton = element<HTMLButtonElement>("#sidebar-toggle-button");
+const sortCustomButton = element<HTMLButtonElement>("#sort-custom-button");
 const sortCreatedButton = element<HTMLButtonElement>("#sort-created-button");
 const sortNameButton = element<HTMLButtonElement>("#sort-name-button");
 const storageMode = element<HTMLElement>("#storage-mode");
@@ -421,6 +432,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   openFilesButton.addEventListener("click", openCheckedFiles);
   openSelectedButton.addEventListener("click", openSelectedPath);
   openStorageFolderButton.addEventListener("click", openStorageFolder);
+  sortCustomButton.addEventListener("click", () => setProjectSortMode("custom"));
   sortCreatedButton.addEventListener("click", () => setProjectSortMode("created"));
   sortNameButton.addEventListener("click", () => setProjectSortMode("name"));
   await listenFolderChanged<FolderChangedPayload>(
@@ -434,6 +446,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   await loadSidebarCollapsed();
   await loadNotesExpanded();
   await loadProjectSortMode();
+  await loadProjectCustomOrder();
   await loadWorkspace();
 });
 
@@ -546,7 +559,15 @@ async function loadProjectSortMode() {
     const mode = await invoke<string>("load_project_sort_mode");
     projectSortMode = normalizeProjectSortMode(mode);
   } catch {
-    projectSortMode = "created";
+    projectSortMode = "custom";
+  }
+}
+
+async function loadProjectCustomOrder() {
+  try {
+    projectCustomOrder = await invoke<number[]>("load_project_custom_order");
+  } catch {
+    projectCustomOrder = [];
   }
 }
 
@@ -569,6 +590,12 @@ async function loadNotesExpanded() {
 async function loadWorkspace() {
   await runCommand(async () => {
     workspace = await invoke<WorkspaceDto>("workspace_snapshot");
+    projectCustomOrder = projectCustomOrder.length === 0
+      ? sortProjectsForDisplay(workspace.projects, projectSortMode).map((project) => project.id)
+      : normalizeProjectCustomOrder(
+          projectCustomOrder,
+          workspace.projects.map((project) => project.id),
+        );
     const restored = workspace.restored_session;
     activeProjectId = restored?.project.id ?? workspace.projects[0]?.id ?? null;
     activeTabId = restored?.active_tab?.id ?? activeProject()?.active_tab_id ?? null;
@@ -622,6 +649,10 @@ async function createProject() {
   await runCommand(async () => {
     workspace = await invoke<WorkspaceDto>("create_project", { name, summary });
     const project = workspace.projects[workspace.projects.length - 1];
+    projectCustomOrder = normalizeProjectCustomOrder(
+      projectCustomOrder,
+      workspace.projects.map((candidate) => candidate.id),
+    );
     activeProjectId = project.id;
     activeTabId = project.active_tab_id;
     projectSelection = { selectedIds: [project.id], anchorId: project.id };
@@ -633,6 +664,7 @@ async function createProject() {
     projectNameInput.value = "";
     projectSummaryInput.value = "";
     render();
+    await persistProjectCustomOrder();
   });
 }
 
@@ -657,6 +689,10 @@ function startProjectInlineEdit(
   } else {
     focusInlineEditor(field);
   }
+}
+
+async function persistProjectCustomOrder() {
+  await invoke("save_project_custom_order", { projectIds: projectCustomOrder });
 }
 
 async function commitProjectInlineEdit(value: string, cancel = false) {
@@ -2217,13 +2253,15 @@ function renderInlineTabFolder(container: HTMLElement, value: string) {
 }
 
 function renderProjects() {
+  sortCustomButton.classList.toggle("is-active", projectSortMode === "custom");
   sortCreatedButton.classList.toggle("is-active", projectSortMode === "created");
   sortNameButton.classList.toggle("is-active", projectSortMode === "name");
+  sortCustomButton.setAttribute("aria-pressed", String(projectSortMode === "custom"));
   sortCreatedButton.setAttribute("aria-pressed", String(projectSortMode === "created"));
   sortNameButton.setAttribute("aria-pressed", String(projectSortMode === "name"));
 
   projectList.replaceChildren(
-    ...sortProjectsForDisplay(workspace.projects, projectSortMode).map((project) => {
+    ...sortProjectsForDisplay(workspace.projects, projectSortMode, projectCustomOrder).map((project) => {
       const item = document.createElement("div");
       item.className = "project-item";
       item.classList.toggle("is-active", project.id === activeProjectId);
@@ -2232,6 +2270,64 @@ function renderProjects() {
       item.tabIndex = 0;
       item.setAttribute("role", "button");
       item.setAttribute("aria-pressed", String(projectSelection.selectedIds.includes(project.id)));
+      item.classList.toggle("is-custom-sort", projectSortMode === "custom");
+      item.addEventListener("pointerdown", (event) => {
+        const target = event.target as HTMLElement;
+        if (
+          projectSortMode !== "custom" ||
+          event.button !== 0 ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.shiftKey ||
+          inlineEditState.field !== null ||
+          Boolean(target.closest(".inline-editor, .project-item-menu-button"))
+        ) return;
+        draggedProjectIds = projectSelection.selectedIds.includes(project.id)
+          ? [...projectSelection.selectedIds]
+          : [project.id];
+        projectPointerState = startProjectPointerDrag(project.id, event.clientY);
+        item.setPointerCapture(event.pointerId);
+      });
+      item.addEventListener("pointermove", (event) => {
+        if (projectPointerState.projectId !== project.id) return;
+        projectPointerState = updateProjectPointerDrag(projectPointerState, event.clientY);
+        if (!projectPointerState.moved) return;
+        item.classList.add("is-dragging");
+        item.style.transform = `translateY(${projectPointerState.deltaY}px) scale(1.02)`;
+        showProjectDropIndicator(event.clientY, draggedProjectIds);
+      });
+      item.addEventListener("pointerup", async (event) => {
+        if (projectPointerState.projectId !== project.id) return;
+        item.releasePointerCapture(event.pointerId);
+        const moved = projectPointerState.moved;
+        const target = projectDropTargetAt(event.clientY, draggedProjectIds);
+        projectPointerState = initialProjectPointerState();
+        item.classList.remove("is-dragging");
+        item.style.transform = "";
+        clearProjectDropIndicators();
+        suppressProjectClick = moved;
+        if (moved) window.setTimeout(() => { suppressProjectClick = false; }, 0);
+        if (!moved || !target) return;
+        projectCustomOrder = moveProjectsInCustomOrder(
+          normalizeProjectCustomOrder(
+            projectCustomOrder,
+            workspace.projects.map((candidate) => candidate.id),
+          ),
+          draggedProjectIds,
+          target.projectId,
+          target.after,
+        );
+        draggedProjectIds = [];
+        render();
+        await runCommand(persistProjectCustomOrder);
+      });
+      item.addEventListener("pointercancel", () => {
+        projectPointerState = initialProjectPointerState();
+        draggedProjectIds = [];
+        item.classList.remove("is-dragging");
+        item.style.transform = "";
+        clearProjectDropIndicators();
+      });
       item.addEventListener("mousedown", async (event) => {
         if ((event.target as HTMLElement).closest(".project-item-menu-button")) return;
         const isInlineEditorTarget = Boolean(
@@ -2254,6 +2350,10 @@ function renderProjects() {
         }
       });
       item.addEventListener("click", (event) => {
+        if (suppressProjectClick) {
+          suppressProjectClick = false;
+          return;
+        }
         if ((event.target as HTMLElement).closest(".project-item-menu-button")) return;
         if (projectEditSurface === "project-list" && editingProjectId === project.id) return;
         void selectProjectFromPointer(project.id, event);
@@ -2302,6 +2402,35 @@ function renderProjects() {
       return item;
     }),
   );
+}
+
+function clearProjectDropIndicators() {
+  projectList
+    .querySelectorAll(".is-drop-before, .is-drop-after")
+    .forEach((item) => item.classList.remove("is-drop-before", "is-drop-after"));
+}
+
+function projectDropTargetAt(clientY: number, movingIds: number[]) {
+  const candidates = [...projectList.querySelectorAll<HTMLElement>(".project-item")]
+    .filter((item) => !movingIds.includes(Number(item.dataset.projectId)));
+  if (candidates.length === 0) return null;
+  for (const item of candidates) {
+    const rect = item.getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) {
+      return { projectId: Number(item.dataset.projectId), after: false, item };
+    }
+    if (clientY <= rect.bottom) {
+      return { projectId: Number(item.dataset.projectId), after: true, item };
+    }
+  }
+  const item = candidates[candidates.length - 1];
+  return { projectId: Number(item.dataset.projectId), after: true, item };
+}
+
+function showProjectDropIndicator(clientY: number, movingIds: number[]) {
+  clearProjectDropIndicators();
+  const target = projectDropTargetAt(clientY, movingIds);
+  target?.item.classList.add(target.after ? "is-drop-after" : "is-drop-before");
 }
 
 function renderProjectListField(project: ProjectDto, field: InlineEditField) {
