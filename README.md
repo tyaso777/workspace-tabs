@@ -80,6 +80,7 @@ C:\Users\<UserName>\AppData\Roaming\local.workspace.tabs\workspace.sqlite3
 - Projectごとの複数Note、Title／Content編集、複数選択、一括削除
 - Projectごとの複数Tabとドラッグ並び替え
 - LinksはCtrl+クリックまたはチェックボックスで複数チェックし、一括Open／Delete可能
+- Folder内のファイルはCtrl+クリックで個別チェック、Shift+クリックで連続範囲をチェック可能
 - 編集欄外のCtrl+Zで直前の削除をUndo
 - Tabごとのフォルダ割り当て
 - ファイル選択、複数チェック、Preview、Open

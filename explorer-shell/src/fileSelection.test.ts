@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkFileRange,
   fileOpenAction,
   fileRowTooltip,
   initialFileSelectionState,
@@ -45,8 +46,27 @@ describe("file selection", () => {
     const third = toggleCheckedFileEntry(second, { path: "C:\\work\\a.txt", isDir: false });
 
     expect(second.selectedPaths).toEqual(["C:\\work\\a.txt", "C:\\work\\b.txt"]);
-    expect(second.selectedPath).toBe("C:\\work\\preview.txt");
+    expect(second.selectedPath).toBe("C:\\work\\b.txt");
     expect(third.selectedPaths).toEqual(["C:\\work\\b.txt"]);
+  });
+
+  it("checks a continuous file range while ignoring folders", () => {
+    const entries = [
+      { path: "C:\\work\\a.txt", isDir: false },
+      { path: "C:\\work\\docs", isDir: true },
+      { path: "C:\\work\\b.txt", isDir: false },
+      { path: "C:\\work\\c.txt", isDir: false },
+    ];
+    const anchored = toggleCheckedFileEntry(initialFileSelectionState(), entries[0]);
+    const ranged = checkFileRange(anchored, entries, entries[3]);
+
+    expect(ranged.selectedPaths).toEqual([
+      "C:\\work\\a.txt",
+      "C:\\work\\b.txt",
+      "C:\\work\\c.txt",
+    ]);
+    expect(ranged.selectedPath).toBe("C:\\work\\c.txt");
+    expect(ranged.checkedAnchorPath).toBe("C:\\work\\a.txt");
   });
 
   it("does not toggle folders into checked files", () => {
@@ -84,6 +104,7 @@ describe("file selection", () => {
     const state = {
       selectedPath: "C:\\work\\preview.txt",
       selectedPaths: ["C:\\work\\a.txt", "C:\\work\\b.txt"],
+      checkedAnchorPath: "C:\\work\\a.txt",
     };
 
     expect(previewTargetPath(state)).toBe("C:\\work\\preview.txt");

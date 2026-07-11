@@ -1,6 +1,7 @@
 export type FileSelectionState = {
   selectedPath: string | null;
   selectedPaths: string[];
+  checkedAnchorPath: string | null;
 };
 
 export type FileSelectionEntry = {
@@ -12,6 +13,7 @@ export function initialFileSelectionState(): FileSelectionState {
   return {
     selectedPath: null,
     selectedPaths: [],
+    checkedAnchorPath: null,
   };
 }
 
@@ -22,6 +24,7 @@ export function selectSingleFileEntry(
   return {
     ...state,
     selectedPath: entry.path,
+    checkedAnchorPath: entry.isDir ? null : entry.path,
   };
 }
 
@@ -43,7 +46,34 @@ export function toggleCheckedFileEntry(
   const selectedPaths = Array.from(selected);
   return {
     ...state,
+    selectedPath: entry.path,
     selectedPaths,
+    checkedAnchorPath: entry.path,
+  };
+}
+
+export function checkFileRange(
+  state: FileSelectionState,
+  entries: FileSelectionEntry[],
+  target: FileSelectionEntry,
+): FileSelectionState {
+  if (target.isDir) return selectSingleFileEntry(state, target);
+  const files = entries.filter((entry) => !entry.isDir);
+  const anchorPath = state.checkedAnchorPath ?? target.path;
+  const anchorIndex = files.findIndex((entry) => entry.path === anchorPath);
+  const targetIndex = files.findIndex((entry) => entry.path === target.path);
+  if (anchorIndex < 0 || targetIndex < 0) {
+    return { ...state, selectedPath: target.path, checkedAnchorPath: target.path };
+  }
+  const start = Math.min(anchorIndex, targetIndex);
+  const end = Math.max(anchorIndex, targetIndex);
+  const checked = new Set(state.selectedPaths);
+  files.slice(start, end + 1).forEach((entry) => checked.add(entry.path));
+  return {
+    ...state,
+    selectedPath: target.path,
+    selectedPaths: [...checked],
+    checkedAnchorPath: anchorPath,
   };
 }
 
