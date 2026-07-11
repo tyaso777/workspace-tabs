@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /explorer-shell
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: cargo
+    directory: /explorer-core
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: cargo
+    directory: /explorer-view-model
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: cargo
+    directory: /explorer-shell/src-tauri
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: cargo
+    directory: /local-web
+    schedule:
+      interval: monthly

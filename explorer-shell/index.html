@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WorkspaceTabs</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <main id="app-shell" class="app-shell">
+      <aside class="project-pane">
+        <div class="pane-header">
+          <h1>WorkspaceTabs</h1>
+          <button id="sidebar-toggle-button" type="button" class="sidebar-toggle-button">&lt;</button>
+        </div>
+
+        <div class="project-pane-content">
+        <form id="project-form" class="stacked-form">
+          <input id="project-name" placeholder="Project name" />
+          <input id="project-summary" placeholder="Short description" />
+          <button type="submit">Add Project</button>
+        </form>
+
+        <div class="project-sort-control" aria-label="Project sort">
+          <button id="sort-created-button" type="button">Created</button>
+          <button id="sort-name-button" type="button">Name</button>
+        </div>
+
+        <div id="project-list" class="project-list"></div>
+
+        <section class="storage-status">
+          <span id="storage-mode">Storage: Unknown</span>
+          <span id="storage-path"></span>
+          <button id="open-storage-folder-button" type="button">Open Folder</button>
+        </section>
+        </div>
+      </aside>
+
+      <section class="workspace-pane">
+        <header class="workspace-header">
+          <div class="project-title-block">
+            <p class="eyebrow">Active Project</p>
+            <h2 id="active-project-name" class="editable-project-field">None</h2>
+            <p id="active-project-summary" class="summary-text editable-project-field"></p>
+          </div>
+          <div class="header-actions">
+            <button
+              id="runtime-close-button"
+              type="button"
+              class="runtime-close-button"
+              title="Close WorkspaceTabs"
+            >
+              <span aria-hidden="true">&#9211;</span>
+              <span id="runtime-close-label">Close</span>
+            </button>
+            <div class="undo-action">
+              <button id="undo-button" type="button">Undo</button>
+              <span id="undo-hint" class="undo-hint"></span>
+            </div>
+            <button id="delete-project-button" type="button" class="danger-button">Delete Project</button>
+          </div>
+        </header>
+
+        <section id="notes-panel" class="notes-panel is-compact">
+          <div class="notes-panel-header">
+            <h3>Notes <span id="notes-count" class="notes-count">(0)</span></h3>
+            <div class="notes-panel-actions">
+              <button id="add-note-button" type="button" class="note-icon-button" title="Add Note" aria-label="Add Note">+</button>
+              <button id="toggle-notes-size-button" type="button" class="note-icon-button" title="Expand Notes" aria-label="Expand Notes">⤢</button>
+            </div>
+          </div>
+          <div class="notes-master-detail">
+            <nav id="note-list" class="note-list" aria-label="Project notes"></nav>
+            <section id="note-detail" class="note-detail is-empty">
+              <div class="note-detail-header">
+                <h4 id="active-note-title">No notes</h4>
+                <button id="delete-note-button" type="button" class="note-delete-button">Delete Note</button>
+              </div>
+              <div id="active-note-content" class="note-content">No content</div>
+            </section>
+          </div>
+        </section>
+
+        <div class="tab-strip">
+          <nav id="tab-list" class="tab-list"></nav>
+          <div class="add-tab-control">
+            <button id="add-tab-button" type="button" class="add-tab-button" aria-label="Add tab" aria-haspopup="menu" aria-controls="add-tab-menu" aria-expanded="false" title="Add tab">+</button>
+            <div id="add-tab-menu" class="project-context-menu add-tab-menu" role="menu" aria-label="Choose tab type" hidden>
+              <div class="add-tab-menu-heading">Choose tab type</div>
+              <button id="add-folder-tab-button" type="button" role="menuitem">
+                <strong>Folder</strong>
+                <span>Browse files in a folder</span>
+              </button>
+              <button id="add-links-tab-button" type="button" role="menuitem">
+                <strong>Links</strong>
+                <span>Save and open web links</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="content-grid">
+          <section class="file-pane">
+            <div class="section-header folder-header">
+              <div>
+                <h3><span id="active-tab-kind-label">Folder:</span> <span id="active-tab-name">None</span></h3>
+                <div id="active-tab-path" class="path-text editable-path"></div>
+              </div>
+              <div class="button-row">
+                <button id="open-folder-button" type="button">Open Folder</button>
+                <button id="add-link-button" type="button" hidden>Add Link</button>
+                <button id="add-links-button" type="button" hidden>Add Links</button>
+              </div>
+            </div>
+            <div id="file-list" class="file-list"></div>
+          </section>
+
+          <aside class="activity-pane">
+            <section>
+              <div class="activity-section-header">
+                <h3>Checked</h3>
+                <button id="open-files-button" type="button">Open Files</button>
+              </div>
+              <div id="checked-paths" class="path-text">None</div>
+            </section>
+            <hr class="activity-separator" />
+            <section>
+              <div class="activity-section-header">
+                <h3>Selected</h3>
+                <button id="open-selected-button" type="button">Open</button>
+              </div>
+              <div id="selected-path" class="path-text">None</div>
+            </section>
+            <section>
+              <h3>Preview</h3>
+              <pre id="preview-content" class="preview-content">No preview</pre>
+            </section>
+            <section>
+              <h3>Recent</h3>
+              <div id="recent-list" class="recent-list"></div>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </main>
+    <div id="file-tooltip" class="file-tooltip" role="tooltip"></div>
+    <div
+      id="local-web-disconnected"
+      class="local-web-disconnected"
+      role="alertdialog"
+      aria-labelledby="local-web-disconnected-title"
+      hidden
+    >
+      <div class="local-web-disconnected-dialog">
+        <h2 id="local-web-disconnected-title">Local Web disconnected</h2>
+        <p id="local-web-disconnected-detail">
+          Restart WorkspaceTabs Local Web, then retry the connection.
+        </p>
+        <button id="retry-local-web-button" type="button">Retry</button>
+      </div>
+    </div>
+    <div id="project-context-menu" class="project-context-menu" role="menu" hidden>
+      <button id="rename-project-menu-button" type="button" role="menuitem">Rename</button>
+      <button id="edit-project-description-menu-button" type="button" role="menuitem">Edit Description</button>
+      <div class="context-menu-separator" role="separator"></div>
+      <button
+        id="delete-project-menu-button"
+        type="button"
+        class="project-menu-danger"
+        role="menuitem"
+      >
+        Delete Project
+      </button>
+    </div>
+    <div id="tab-context-menu" class="project-context-menu" role="menu" hidden>
+      <button id="rename-tab-menu-button" type="button" role="menuitem">Rename</button>
+      <div class="context-menu-separator" role="separator"></div>
+      <button id="delete-tab-menu-button" type="button" class="project-menu-danger" role="menuitem">Delete Tab</button>
+    </div>
+    <div id="note-context-menu" class="project-context-menu" role="menu" hidden>
+      <button id="edit-note-title-menu-button" type="button" role="menuitem">Edit Title</button>
+      <button id="edit-note-content-menu-button" type="button" role="menuitem">Edit Content</button>
+      <div class="context-menu-separator" role="separator"></div>
+      <button
+        id="delete-note-menu-button"
+        type="button"
+        class="project-menu-danger"
+        role="menuitem"
+      >
+        Delete Note
+      </button>
+    </div>
+    <div id="link-context-menu" class="project-context-menu" role="menu" hidden>
+      <button id="edit-link-name-menu-button" type="button" role="menuitem">Edit Name</button>
+      <button id="edit-link-url-menu-button" type="button" role="menuitem">Edit URL</button>
+      <button id="open-link-menu-button" type="button" role="menuitem">Open</button>
+      <button id="copy-link-menu-button" type="button" role="menuitem">Copy URL</button>
+      <div class="context-menu-separator" role="separator"></div>
+      <button id="delete-link-menu-button" type="button" class="project-menu-danger" role="menuitem">Delete Link</button>
+    </div>
+    <dialog id="add-link-dialog" class="confirmation-dialog add-links-dialog">
+      <form method="dialog">
+        <h3>Add Link</h3>
+        <div class="link-dialog-fields">
+          <label for="add-link-name">Display name <span>(optional)</span></label>
+          <input id="add-link-name" type="text" autocomplete="off" />
+          <label for="add-link-url">URL</label>
+          <textarea id="add-link-url" rows="3" wrap="soft" placeholder="https://example.com"></textarea>
+        </div>
+        <p id="add-link-error" class="dialog-error" hidden></p>
+        <div class="confirmation-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button id="confirm-add-link-button" type="button">Add Link</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="add-links-dialog" class="confirmation-dialog add-links-dialog">
+      <form method="dialog">
+        <h3>Add Links</h3>
+        <label for="add-links-input">URLs <span>(one per line)</span></label>
+        <textarea id="add-links-input" rows="8" wrap="soft"></textarea>
+        <div class="link-input-example">
+          <strong>Example:</strong>
+          <code>https://example.com<br />https://example.org</code>
+        </div>
+        <p id="add-links-error" class="dialog-error" hidden></p>
+        <div class="confirmation-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button id="confirm-add-links-button" type="button">Add Links</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="delete-project-dialog" class="confirmation-dialog">
+      <form method="dialog">
+        <h3 id="delete-project-dialog-title">Delete project?</h3>
+        <p id="delete-project-dialog-detail"></p>
+        <div class="confirmation-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button
+            id="confirm-delete-project-button"
+            type="button"
+            class="danger-button"
+          >
+            Delete Project
+          </button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="delete-tab-dialog" class="confirmation-dialog">
+      <form method="dialog">
+        <h3 id="delete-tab-dialog-title">Delete tab?</h3>
+        <p id="delete-tab-dialog-detail"></p>
+        <div class="confirmation-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button id="confirm-delete-tab-button" type="button" class="danger-button">Delete Tab</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="close-runtime-dialog" class="confirmation-dialog">
+      <form method="dialog">
+        <h3 id="close-runtime-dialog-title">Close WorkspaceTabs?</h3>
+        <p id="close-runtime-dialog-detail"></p>
+        <div class="confirmation-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button id="confirm-close-runtime-button" type="button">Close</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

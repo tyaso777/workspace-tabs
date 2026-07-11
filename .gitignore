@@ -1,0 +1,30 @@
+# Private runtime data and release artifacts
+/outputs/
+/work/
+/.agents/
+/.codex/
+
+# Rust build output
+**/target/
+
+# Frontend dependencies and build output
+**/node_modules/
+**/dist/
+
+# Local settings, logs, and databases
+*.local
+*.log
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

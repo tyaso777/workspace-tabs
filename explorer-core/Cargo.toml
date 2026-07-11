@@ -1,0 +1,9 @@
+[package]
+name = "explorer-core"
+version = "0.1.0"
+edition = "2024"
+authors = ["Atsushi Suzuki"]
+license = "MIT"
+repository = "https://github.com/tyaso777/workspace-tabs"
+
+[dependencies]

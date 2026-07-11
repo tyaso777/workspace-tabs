@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: explorer-shell/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            explorer-core
+            explorer-view-model
+            explorer-shell/src-tauri
+            local-web
+
+      - name: Install frontend dependencies
+        working-directory: explorer-shell
+        run: npm ci
+      - name: Audit npm dependencies
+        working-directory: explorer-shell
+        run: npm audit
+      - name: Test frontend
+        working-directory: explorer-shell
+        run: npm run test:ui
+      - name: Build frontend
+        working-directory: explorer-shell
+        run: npm run build
+
+      - name: Test explorer-core
+        run: cargo test --manifest-path explorer-core/Cargo.toml --locked
+      - name: Test explorer-view-model
+        run: cargo test --manifest-path explorer-view-model/Cargo.toml --locked
+      - name: Test Desktop
+        run: cargo test --manifest-path explorer-shell/src-tauri/Cargo.toml --locked
+      - name: Test Local Web
+        run: cargo test --manifest-path local-web/Cargo.toml --locked
