@@ -22,6 +22,7 @@ import {
   emptyTabFolderPrompt,
   emptyInlineEditState,
   finishInlineEdit,
+  shouldShowInlineEditPlaceholder,
   startInlineEdit,
   startTabFolderEditForChoice,
   type InlineEditField,
@@ -83,7 +84,7 @@ import {
   initialTabPointerState,
   shouldActivateReleasedTab,
   shouldFinishInlineEditBeforeTabPointerInteraction,
-  shouldStartTabNameEditFromPointerDown,
+  shouldStartTabNameEditFromMouseDown,
   startTabPointerDrag,
   updateTabPointerDrag,
   type TabPointerState,
@@ -2001,12 +2002,19 @@ function renderInlineProjectField(
 ) {
   if (inlineEditState.field !== field || projectEditSurface !== "active-header") {
     container.textContent = value;
-    container.classList.toggle("inline-editable-empty", value.length === 0);
+    container.classList.toggle(
+      "inline-editable-empty",
+      shouldShowInlineEditPlaceholder(value, false),
+    );
     container.title = "Double-click to edit";
     return;
   }
 
   container.title = "";
+  container.classList.toggle(
+    "inline-editable-empty",
+    shouldShowInlineEditPlaceholder(value, true),
+  );
   const input = document.createElement("input");
   input.className = "inline-editor";
   input.dataset.inlineField = field;
@@ -2551,20 +2559,25 @@ function renderTabs() {
       item.dataset.tabId = String(tab.id);
       item.dataset.index = String(index);
       item.dataset.tabKind = tab.kind;
-      item.addEventListener("pointerdown", async (event) => {
-        if (event.button !== 0) return;
+      item.addEventListener("mousedown", (event) => {
         const hasSelectionModifier = event.ctrlKey || event.metaKey || event.shiftKey;
         if (
-          shouldStartTabNameEditFromPointerDown(
+          !hasSelectionModifier &&
+          shouldStartTabNameEditFromMouseDown(
             Boolean((event.target as HTMLElement).closest(".tab-button")),
             event.detail,
             inlineEditState.field === "tabName" && activeTabId === tab.id,
-          ) && !hasSelectionModifier
+          )
         ) {
           event.preventDefault();
+          event.stopPropagation();
+          tabPointerState = initialTabPointerState();
           startTabInlineEdit("tabName", tab.id);
-          return;
         }
+      });
+      item.addEventListener("pointerdown", async (event) => {
+        if (event.button !== 0) return;
+        const hasSelectionModifier = event.ctrlKey || event.metaKey || event.shiftKey;
         const isInlineEditorTarget = Boolean(
           (event.target as HTMLElement).closest(".inline-editor"),
         );

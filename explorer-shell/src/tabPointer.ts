@@ -14,7 +14,7 @@ export type TabPointerAction =
 
 export const TAB_DRAG_THRESHOLD_PX = 6;
 
-export function shouldStartTabNameEditFromPointerDown(
+export function shouldStartTabNameEditFromMouseDown(
   isTabNameTarget: boolean,
   clickCount: number,
   isAlreadyEditing = false,

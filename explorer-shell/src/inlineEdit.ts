@@ -34,6 +34,10 @@ export function startTabFolderEditForChoice(currentFolderPath: string): InlineEd
   return startInlineEdit("tabFolder", currentFolderPath);
 }
 
+export function shouldShowInlineEditPlaceholder(value: string, isEditing: boolean) {
+  return !isEditing && value.length === 0;
+}
+
 export function emptyTabFolderPrompt() {
   return {
     state: "No folder selected",

@@ -4,7 +4,7 @@ import {
   initialTabPointerState,
   shouldActivateReleasedTab,
   shouldFinishInlineEditBeforeTabPointerInteraction,
-  shouldStartTabNameEditFromPointerDown,
+  shouldStartTabNameEditFromMouseDown,
   startTabPointerDrag,
   updateTabPointerDrag,
 } from "./tabPointer";
@@ -65,19 +65,19 @@ describe("tab pointer interaction", () => {
   });
 
   it("starts tab name editing on the second pointer down on a tab name", () => {
-    expect(shouldStartTabNameEditFromPointerDown(true, 2)).toBe(true);
+    expect(shouldStartTabNameEditFromMouseDown(true, 2)).toBe(true);
   });
 
   it("does not start tab name editing from a single pointer down", () => {
-    expect(shouldStartTabNameEditFromPointerDown(true, 1)).toBe(false);
+    expect(shouldStartTabNameEditFromMouseDown(true, 1)).toBe(false);
   });
 
   it("does not start tab name editing from non-name tab controls", () => {
-    expect(shouldStartTabNameEditFromPointerDown(false, 2)).toBe(false);
+    expect(shouldStartTabNameEditFromMouseDown(false, 2)).toBe(false);
   });
 
   it("does not restart tab name editing after the editor has opened", () => {
-    expect(shouldStartTabNameEditFromPointerDown(true, 2, true)).toBe(false);
+    expect(shouldStartTabNameEditFromMouseDown(true, 2, true)).toBe(false);
   });
 
   it("does not reactivate the tab that is already active", () => {

@@ -3,6 +3,7 @@ import {
   emptyTabFolderPrompt,
   emptyInlineEditState,
   finishInlineEdit,
+  shouldShowInlineEditPlaceholder,
   startInlineEdit,
   startTabFolderEditForChoice,
 } from "./inlineEdit";
@@ -40,6 +41,11 @@ describe("inline edit interaction", () => {
     const result = finishInlineEdit(state, "Changed", { cancel: true });
 
     expect(result).toEqual({ type: "cancel" });
+  });
+
+  it("hides the empty-field placeholder while the field is being edited", () => {
+    expect(shouldShowInlineEditPlaceholder("", false)).toBe(true);
+    expect(shouldShowInlineEditPlaceholder("", true)).toBe(false);
   });
 
   it("supports editing note content in place", () => {
