@@ -1197,6 +1197,7 @@ button.is-active {
 }
 
 .file-row {
+  flex: 0 0 auto;
   position: relative;
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr) 64px;
@@ -1226,8 +1227,9 @@ button.is-active {
 
 .file-row.is-current {
   grid-template-columns: 48px minmax(0, 1fr) 64px 4px;
-  border-color: #7aa7ba;
-  background: #eef7fa;
+  border-color: #4f8da5;
+  background: #dceff6;
+  box-shadow: inset 0 0 0 1px rgba(36, 112, 141, 0.12);
 }
 
 .file-row.is-current::after {
@@ -1306,6 +1308,7 @@ button.is-active {
 }
 
 .link-row {
+  flex: 0 0 auto;
   position: relative;
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) 126px;
