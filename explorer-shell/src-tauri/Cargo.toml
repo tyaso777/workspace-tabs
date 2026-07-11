@@ -22,7 +22,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 explorer-core = { path = "../../explorer-core" }
 explorer-view-model = { path = "../../explorer-view-model" }
-notify = "6"
+notify = "8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 rfd = "0.16.0"
 tauri = { version = "2", features = [] }
