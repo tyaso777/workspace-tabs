@@ -17,8 +17,9 @@ export const TAB_DRAG_THRESHOLD_PX = 6;
 export function shouldStartTabNameEditFromPointerDown(
   isTabNameTarget: boolean,
   clickCount: number,
+  isAlreadyEditing = false,
 ): boolean {
-  return isTabNameTarget && clickCount >= 2;
+  return !isAlreadyEditing && isTabNameTarget && clickCount >= 2;
 }
 
 export function shouldActivateReleasedTab(

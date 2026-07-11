@@ -76,6 +76,10 @@ describe("tab pointer interaction", () => {
     expect(shouldStartTabNameEditFromPointerDown(false, 2)).toBe(false);
   });
 
+  it("does not restart tab name editing after the editor has opened", () => {
+    expect(shouldStartTabNameEditFromPointerDown(true, 2, true)).toBe(false);
+  });
+
   it("does not reactivate the tab that is already active", () => {
     expect(shouldActivateReleasedTab({ type: "activate", tabId: 3 }, 3)).toBe(false);
   });

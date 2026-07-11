@@ -2066,17 +2066,6 @@ function renderInlineTabName(tab: TabDto) {
         }),
       );
     }
-    button.addEventListener("mousedown", (event) => {
-      if (!shouldStartTabNameEditFromPointerDown(true, event.detail)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      startTabInlineEdit("tabName", tab.id);
-    });
-    button.addEventListener("dblclick", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      startTabInlineEdit("tabName", tab.id);
-    });
     return button;
   }
 
@@ -2569,6 +2558,7 @@ function renderTabs() {
           shouldStartTabNameEditFromPointerDown(
             Boolean((event.target as HTMLElement).closest(".tab-button")),
             event.detail,
+            inlineEditState.field === "tabName" && activeTabId === tab.id,
           ) && !hasSelectionModifier
         ) {
           event.preventDefault();
