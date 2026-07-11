@@ -918,6 +918,10 @@ button.is-active {
   color: #56616b;
 }
 
+#delete-link-dialog-detail {
+  white-space: pre-line;
+}
+
 .confirmation-actions {
   display: flex;
   justify-content: flex-end;

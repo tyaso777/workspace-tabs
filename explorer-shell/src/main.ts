@@ -11,13 +11,18 @@ import {
   type FileSelectionState,
 } from "./fileSelection";
 import {
+  linkClickAction,
+  linkDeleteConfirmation,
   linkEditField,
+  linkIdsForDelete,
   linkPreviewText,
   parseLinkLines,
   parseSingleLink,
+  selectedLinkView,
   toggleCheckedLink,
   type LinkInput,
 } from "./links";
+import { shouldRunAppUndo } from "./keyboard";
 import {
   emptyTabFolderPrompt,
   emptyInlineEditState,
@@ -239,9 +244,10 @@ let tabMenuTabId: number | null = null;
 let editingLink: { id: number; field: "name" | "url" } | null = null;
 let copiedLinkId: number | null = null;
 let draggedLinkId: number | null = null;
-let linkSelectionTimer: number | null = null;
+let linkSelectionQueue: Promise<void> = Promise.resolve();
 let pendingDeleteProjectIds: number[] = [];
 let pendingDeleteTabIds: number[] = [];
+let pendingDeleteLinkIds: number[] = [];
 let runtimeCloseInProgress = false;
 
 const appShell = element<HTMLElement>("#app-shell");
@@ -308,6 +314,10 @@ const addLinksDialog = element<HTMLDialogElement>("#add-links-dialog");
 const addLinksInput = element<HTMLTextAreaElement>("#add-links-input");
 const addLinksError = element<HTMLElement>("#add-links-error");
 const confirmAddLinksButton = element<HTMLButtonElement>("#confirm-add-links-button");
+const deleteLinkDialog = element<HTMLDialogElement>("#delete-link-dialog");
+const deleteLinkDialogTitle = element<HTMLElement>("#delete-link-dialog-title");
+const deleteLinkDialogDetail = element<HTMLElement>("#delete-link-dialog-detail");
+const confirmDeleteLinkButton = element<HTMLButtonElement>("#confirm-delete-link-button");
 const fileTooltip = element<HTMLElement>("#file-tooltip");
 const checkedPaths = element<HTMLElement>("#checked-paths");
 const selectedPath = element<HTMLElement>("#selected-path");
@@ -376,6 +386,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   openLinkMenuButton.addEventListener("click", openLinkFromMenu);
   copyLinkMenuButton.addEventListener("click", copyLinkFromMenu);
   deleteLinkMenuButton.addEventListener("click", deleteLinkFromMenu);
+  confirmDeleteLinkButton.addEventListener("click", confirmLinkDelete);
   confirmDeleteProjectButton.addEventListener("click", confirmProjectDelete);
   confirmDeleteTabButton.addEventListener("click", confirmTabDelete);
   deleteProjectDialog.addEventListener("close", () => {
@@ -383,6 +394,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
   deleteTabDialog.addEventListener("close", () => {
     pendingDeleteTabIds = [];
+  });
+  deleteLinkDialog.addEventListener("close", () => {
+    pendingDeleteLinkIds = [];
   });
   document.addEventListener("pointerdown", (event) => {
     const target = event.target as HTMLElement;
@@ -402,6 +416,19 @@ window.addEventListener("DOMContentLoaded", async () => {
     closeAddTabMenu();
   });
   document.addEventListener("keydown", (event) => {
+    const target = event.target as HTMLElement;
+    if (shouldRunAppUndo(
+      event.key,
+      event.ctrlKey,
+      event.metaKey,
+      event.shiftKey,
+      target.tagName,
+      target.isContentEditable,
+    )) {
+      event.preventDefault();
+      void undoLast();
+      return;
+    }
     if (event.key !== "Escape") return;
     closeProjectContextMenu();
     closeNoteContextMenu();
@@ -1440,34 +1467,36 @@ async function addLinksToActiveTab(links: LinkInput[], dialog: HTMLDialogElement
   });
 }
 
-async function selectLink(link: LinkDto) {
+function selectLink(link: LinkDto) {
   const project = activeProject();
   const tab = activeTab();
-  if (!project || tab?.kind !== "links") return;
-  await runCommand(async () => {
+  if (!project || tab?.kind !== "links") return Promise.resolve();
+  showSelectedLinkImmediately(tab, link);
+
+  linkSelectionQueue = linkSelectionQueue.then(() => runCommand(async () => {
     workspace = await invoke<WorkspaceDto>("select_link", {
       projectId: project.id,
       tabId: tab.id,
       linkId: link.id,
     });
-    previewText = linkPreviewText(link);
-    render();
+  }));
+  return linkSelectionQueue;
+}
+
+function showSelectedLinkImmediately(tab: LinksTabDto, link: LinkDto) {
+  const view = selectedLinkView(link);
+  tab.selected_link_id = view.selectedLinkId;
+  previewText = view.preview;
+  fileList.querySelectorAll<HTMLElement>(".link-row").forEach((row) => {
+    row.classList.toggle("is-current", Number(row.dataset.linkId) === link.id);
   });
+  selectedPath.textContent = view.selectedUrl;
+  previewContent.textContent = view.preview;
+  openSelectedButton.disabled = false;
 }
 
 function scheduleLinkSelection(link: LinkDto) {
-  if (linkSelectionTimer !== null) window.clearTimeout(linkSelectionTimer);
-  linkSelectionTimer = window.setTimeout(() => {
-    linkSelectionTimer = null;
-    selectLink(link);
-  }, 180);
-}
-
-function cancelScheduledLinkSelection() {
-  if (linkSelectionTimer !== null) {
-    window.clearTimeout(linkSelectionTimer);
-    linkSelectionTimer = null;
-  }
+  void selectLink(link);
 }
 
 async function toggleCheckedLinkEntry(link: LinkDto) {
@@ -1475,12 +1504,19 @@ async function toggleCheckedLinkEntry(link: LinkDto) {
   const tab = activeTab();
   if (!project || tab?.kind !== "links") return;
   const linkIds = toggleCheckedLink(tab.checked_link_ids, link.id);
+  showSelectedLinkImmediately(tab, link);
   await runCommand(async () => {
     workspace = await invoke<WorkspaceDto>("update_checked_links", {
       projectId: project.id,
       tabId: tab.id,
       linkIds,
     });
+    workspace = await invoke<WorkspaceDto>("select_link", {
+      projectId: project.id,
+      tabId: tab.id,
+      linkId: link.id,
+    });
+    previewText = linkPreviewText(link);
     render();
   });
 }
@@ -1549,6 +1585,11 @@ function openLinkContextMenu(link: LinkDto, pointerX: number, pointerY: number) 
   closeProjectContextMenu();
   closeNoteContextMenu();
   linkMenuLinkId = link.id;
+  const tab = activeTab();
+  const deleteCount = tab?.kind === "links"
+    ? linkIdsForDelete(link.id, tab.checked_link_ids).length
+    : 1;
+  deleteLinkMenuButton.textContent = deleteCount === 1 ? "Delete Link" : `Delete ${deleteCount} Links`;
   linkContextMenu.hidden = false;
   const position = projectMenuPosition({
     pointerX,
@@ -1593,19 +1634,35 @@ async function copyLinkFromMenu() {
 async function deleteLinkFromMenu() {
   const link = linkFromMenu();
   closeLinkContextMenu();
-  if (link) await deleteLinks([link.id]);
+  const tab = activeTab();
+  if (link && tab?.kind === "links") {
+    requestLinkDelete(linkIdsForDelete(link.id, tab.checked_link_ids));
+  }
+}
+
+function requestLinkDelete(linkIds: number[]) {
+  const links = linksForActiveTab().filter((link) => linkIds.includes(link.id));
+  if (links.length === 0) return;
+  pendingDeleteLinkIds = links.map((link) => link.id);
+  const confirmation = linkDeleteConfirmation(links);
+  deleteLinkDialogTitle.textContent = confirmation.title;
+  deleteLinkDialogDetail.textContent = confirmation.detail;
+  confirmDeleteLinkButton.textContent = confirmation.buttonLabel;
+  if (!deleteLinkDialog.open) deleteLinkDialog.showModal();
+}
+
+async function confirmLinkDelete() {
+  if (pendingDeleteLinkIds.length === 0) return;
+  const linkIds = [...pendingDeleteLinkIds];
+  pendingDeleteLinkIds = [];
+  deleteLinkDialog.close();
+  await deleteLinks(linkIds);
 }
 
 async function deleteLinks(linkIds: number[]) {
   const project = activeProject();
   const tab = activeTab();
   if (!project || tab?.kind !== "links" || linkIds.length === 0) return;
-  const names = linksForActiveTab()
-    .filter((link) => linkIds.includes(link.id))
-    .map((link) => link.name);
-  if (!window.confirm(`Delete ${names.length === 1 ? `"${names[0]}"` : `${names.length} links`}?`)) {
-    return;
-  }
   await runCommand(async () => {
     workspace = await invoke<WorkspaceDto>("delete_links", {
       projectId: project.id,
@@ -2968,6 +3025,7 @@ function renderLinks() {
     ...links.map((link, index) => {
       const row = document.createElement("div");
       row.className = "link-row";
+      row.dataset.linkId = String(link.id);
       row.tabIndex = 0;
       row.role = "button";
       row.draggable = true;
@@ -2980,7 +3038,8 @@ function renderLinks() {
       check.setAttribute("aria-label", "Check link");
       check.addEventListener("click", (event) => {
         event.stopPropagation();
-        toggleCheckedLinkEntry(link);
+        const action = linkClickAction(event.ctrlKey || event.metaKey, true);
+        if (action.toggleChecked) void toggleCheckedLinkEntry(link);
       });
 
       const fields = document.createElement("div");
@@ -3005,7 +3064,14 @@ function renderLinks() {
       });
       actions.append(openButton, copyButton);
       row.append(check, fields, actions);
-      row.addEventListener("click", () => scheduleLinkSelection(link));
+      row.addEventListener("click", (event) => {
+        const action = linkClickAction(event.ctrlKey || event.metaKey, false);
+        if (action.toggleChecked) {
+          void toggleCheckedLinkEntry(link);
+        } else if (action.select) {
+          scheduleLinkSelection(link);
+        }
+      });
       row.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         openLinkContextMenu(link, event.clientX, event.clientY);
@@ -3078,7 +3144,6 @@ function renderLinkField(link: LinkDto, field: "name" | "url") {
   value.addEventListener("dblclick", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    cancelScheduledLinkSelection();
     const editField = linkEditField((event.currentTarget as HTMLElement).dataset.linkField);
     if (editField) startLinkEdit(link, editField);
   });

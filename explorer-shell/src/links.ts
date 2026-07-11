@@ -32,6 +32,34 @@ export function toggleCheckedLink(ids: number[], linkId: number): number[] {
   return ids.includes(linkId) ? ids.filter((id) => id !== linkId) : [...ids, linkId];
 }
 
+export function linkClickAction(ctrlKey: boolean, checkboxTarget: boolean) {
+  return {
+    select: true,
+    toggleChecked: ctrlKey || checkboxTarget,
+  };
+}
+
+export function linkIdsForDelete(clickedLinkId: number, checkedLinkIds: number[]) {
+  return checkedLinkIds.includes(clickedLinkId) ? [...checkedLinkIds] : [clickedLinkId];
+}
+
+export function linkDeleteConfirmation(links: Array<{ name: string; url: string }>) {
+  const labels = links.map((link) => link.name || link.url);
+  return {
+    title: links.length === 1 ? "Delete link?" : `Delete ${links.length} links?`,
+    detail: labels.join("\n"),
+    buttonLabel: links.length === 1 ? "Delete Link" : `Delete ${links.length} Links`,
+  };
+}
+
 export function linkPreviewText(link: { name: string; url: string }): string {
   return `${link.name}\n${link.url}`;
+}
+
+export function selectedLinkView(link: { id: number; name: string; url: string }) {
+  return {
+    selectedLinkId: link.id,
+    selectedUrl: link.url,
+    preview: linkPreviewText(link),
+  };
 }

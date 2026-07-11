@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   linkEditField,
+  linkClickAction,
+  linkDeleteConfirmation,
+  linkIdsForDelete,
   linkPreviewText,
   parseLinkLines,
   parseSingleLink,
+  selectedLinkView,
   toggleCheckedLink,
 } from "./links";
 
@@ -57,9 +61,39 @@ describe("links tab", () => {
     expect(toggleCheckedLink([1], 3)).toEqual([1, 3]);
   });
 
+  it("selects and checks a link on Ctrl-click or checkbox click", () => {
+    expect(linkClickAction(true, false)).toEqual({ select: true, toggleChecked: true });
+    expect(linkClickAction(false, true)).toEqual({ select: true, toggleChecked: true });
+    expect(linkClickAction(false, false)).toEqual({ select: true, toggleChecked: false });
+  });
+
+  it("deletes all checked links when the context link is checked", () => {
+    expect(linkIdsForDelete(2, [1, 2, 3])).toEqual([1, 2, 3]);
+    expect(linkIdsForDelete(4, [1, 2, 3])).toEqual([4]);
+  });
+
+  it("describes a multi-link delete confirmation", () => {
+    expect(linkDeleteConfirmation([
+      { name: "Docs", url: "https://example.com/docs" },
+      { name: "", url: "https://example.com/help" },
+    ])).toEqual({
+      title: "Delete 2 links?",
+      detail: "Docs\nhttps://example.com/help",
+      buttonLabel: "Delete 2 Links",
+    });
+  });
+
   it("refreshes preview text from the latest edited link values", () => {
     expect(linkPreviewText({ name: "Updated", url: "https://example.com/new" })).toBe(
       "Updated\nhttps://example.com/new",
     );
+  });
+
+  it("builds the immediate selected-link view without a delay", () => {
+    expect(selectedLinkView({ id: 7, name: "Docs", url: "https://example.com" })).toEqual({
+      selectedLinkId: 7,
+      selectedUrl: "https://example.com",
+      preview: "Docs\nhttps://example.com",
+    });
   });
 });
