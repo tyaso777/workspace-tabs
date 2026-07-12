@@ -42,6 +42,27 @@ test("creates, edits, switches, and reorders workspace tabs", async ({ page }) =
 
   await page.locator(".project-item").filter({ hasText: "First Project" }).click();
 
+  await page.locator("#add-note-button").click();
+  await page.locator('input[data-inline-field="noteTitle"]').fill("Note A");
+  await page.locator('input[data-inline-field="noteTitle"]').press("Enter");
+  await page.locator("#add-note-button").click();
+  await page.locator('input[data-inline-field="noteTitle"]').fill("Note B");
+  await page.locator('input[data-inline-field="noteTitle"]').press("Enter");
+  await expect(page.locator(".note-list-item")).toHaveCount(2);
+
+  await page.locator(".note-list-item").filter({ hasText: "Note A" }).click({ modifiers: ["Control"] });
+  await expect(page.locator(".note-list-item.is-selected")).toHaveCount(2);
+  await page.locator(".note-list-item").filter({ hasText: "Note B" }).click({ button: "right" });
+  await expect(page.locator("#delete-note-menu-button")).toHaveText("Delete 2 Notes");
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("Delete 2 notes?");
+    await dialog.accept();
+  });
+  await page.locator("#delete-note-menu-button").click();
+  await expect(page.locator(".note-list-item")).toHaveCount(0);
+  await page.locator("#undo-button").click();
+  await expect(page.locator(".note-list-item")).toHaveCount(2);
+
   await page.locator("#add-tab-button").click();
   await expect(page.locator("#add-tab-menu")).toBeVisible();
   await page.locator("#add-folder-tab-button").click();
@@ -58,6 +79,35 @@ test("creates, edits, switches, and reorders workspace tabs", async ({ page }) =
   await expect(page.locator('input[data-inline-field="tabName"]')).toBeVisible();
   await page.locator('input[data-inline-field="tabName"]').fill("Reports 2026");
   await page.locator('input[data-inline-field="tabName"]').press("Enter");
+
+  await page.locator("#add-tab-button").click();
+  await page.locator("#add-links-tab-button").click();
+  await page.locator('input[data-inline-field="tabName"]').fill("Bookmarks");
+  await page.locator('input[data-inline-field="tabName"]').press("Enter");
+  await page.locator("#add-links-button").click();
+  await page.locator("#add-links-input").fill(
+    "https://example.com\nhttps://example.org",
+  );
+  await page.locator("#confirm-add-links-button").click();
+  await expect(page.locator(".link-row")).toHaveCount(2);
+
+  await page.locator(".link-row .file-check").nth(0).click();
+  await page.locator(".link-row .file-check").nth(1).click();
+  await expect(page.locator(".link-row.is-checked")).toHaveCount(2);
+  await page.locator(".link-row").first().click({ button: "right" });
+  await expect(page.locator("#delete-link-menu-button")).toHaveText("Delete 2 Links");
+  await page.locator("#delete-link-menu-button").click();
+  await expect(page.locator("#delete-link-dialog-title")).toHaveText("Delete 2 links?");
+  await page.locator("#confirm-delete-link-button").click();
+  await expect(page.locator(".link-row")).toHaveCount(0);
+  await page.locator("#undo-button").click();
+  await expect(page.locator(".link-row")).toHaveCount(2);
+
+  const bookmarksTab = page.locator(".tab-item").filter({ hasText: "Bookmarks" });
+  await bookmarksTab.click({ button: "right" });
+  await page.locator("#delete-tab-menu-button").click();
+  await page.locator("#confirm-delete-tab-button").click();
+  await expect(page.locator(".tab-item")).toHaveCount(2);
 
   const defaultTab = page.locator(".tab-item").filter({ hasText: "New Tab" }).first();
   await defaultTab.locator(".tab-button").click();
