@@ -53,8 +53,8 @@ import {
 } from "./projectSort";
 import {
   shouldFinishProjectEditBeforeActivation,
-  shouldStartProjectFieldEditFromPointerDown,
 } from "./projectPointer";
+import { renderProjectListField as renderProjectListFieldElement } from "./projectListFieldRenderer";
 import {
   Folder as FolderIcon,
   File as FileIcon,
@@ -2471,59 +2471,25 @@ function showProjectDropIndicator(clientY: number, movingIds: number[]) {
 }
 
 function renderProjectListField(project: ProjectDto, field: InlineEditField) {
-  const isName = field === "projectName";
-  const value = isName ? project.name : project.summary || "No description";
-
-  if (
-    inlineEditState.field === field &&
-    projectEditSurface === "project-list" &&
-    editingProjectId === project.id
-  ) {
-    const input = document.createElement("input");
-    input.className = "inline-editor project-list-inline-editor";
-    input.dataset.inlineField = field;
-    input.value = inlineEditState.draft;
-    input.addEventListener("mousedown", (event) => event.stopPropagation());
-    input.addEventListener("click", (event) => event.stopPropagation());
-    input.addEventListener("input", () => {
-      inlineEditState = {
-        ...inlineEditState,
-        draft: input.value,
-      };
-    });
-    input.addEventListener("keydown", async (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        await commitProjectInlineEdit(input.value);
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        await commitProjectInlineEdit(input.value, true);
-      }
-    });
-    input.addEventListener("blur", async () => {
-      if (inlineEditState.field === field && editingProjectId === project.id) {
-        await commitProjectInlineEdit(input.value);
-      }
-    });
-    return input;
-  }
-
-  const element = isName ? document.createElement("strong") : document.createElement("span");
-  element.className = "project-list-editable";
-  element.textContent = value;
-  element.title = isName ? "Double-click to edit project name" : "Double-click to edit description";
-  element.addEventListener("mousedown", (event) => {
-    if (!shouldStartProjectFieldEditFromPointerDown(true, event.detail)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    startProjectInlineEdit(field, project.id, "project-list");
-  });
-  element.addEventListener("dblclick", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    startProjectInlineEdit(field, project.id, "project-list");
-  });
-  return element;
+  return renderProjectListFieldElement(
+    project,
+    field,
+    {
+      inlineEdit: inlineEditState,
+      editingProjectId,
+      editSurface: projectEditSurface,
+    },
+    {
+      startEdit: (nextField, projectId) =>
+        startProjectInlineEdit(nextField, projectId, "project-list"),
+      updateDraft: (value) => { inlineEditState = { ...inlineEditState, draft: value }; },
+      commitEdit: commitProjectInlineEdit,
+      isEditing: (projectId, nextField) =>
+        inlineEditState.field === nextField &&
+        editingProjectId === projectId &&
+        projectEditSurface === "project-list",
+    },
+  );
 }
 
 function projectInlineValue(project: ProjectDto, field: InlineEditField) {
