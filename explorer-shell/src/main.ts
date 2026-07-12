@@ -58,8 +58,6 @@ import {
 import {
   Folder as FolderIcon,
   File as FileIcon,
-  Link as LinkIcon,
-  Check as CheckIcon,
   createElement as createLucideElement,
 } from "lucide";
 import {
@@ -98,22 +96,12 @@ import {
   runtimeDisplayName,
   type LocalWebConnectionState,
 } from "./runtime";
-import {
-  finishTabPointerDrag,
-  initialTabPointerState,
-  shouldActivateReleasedTab,
-  shouldFinishInlineEditBeforeTabPointerInteraction,
-  shouldStartTabNameEditFromMouseDown,
-  startTabPointerDrag,
-  updateTabPointerDrag,
-  type TabPointerState,
-} from "./tabPointer";
+import { TabBarRenderer } from "./tabBarRenderer";
 import { tabWheelScroll } from "./tabWheel";
 import { tabCreationMenuOpenAfter, tabCreationMenuPosition } from "./tabCreationMenu";
 import {
   tabDeleteConfirmationForTabs,
   tabDeleteMenuLabel,
-  tabKindLabel,
 } from "./tabMenu";
 import {
   DEFAULT_TAB_NAME,
@@ -231,7 +219,6 @@ let editingProjectId: number | null = null;
 let editingNoteId: number | null = null;
 let projectEditSurface: "active-header" | "project-list" = "active-header";
 let tabNameEditSurface: "tab-bar" | "active-header" = "tab-bar";
-let tabPointerState: TabPointerState = initialTabPointerState();
 let fileSelectionState: FileSelectionState = initialFileSelectionState();
 let projectSortMode: ProjectSortMode = "custom";
 let projectCustomOrder: number[] = [];
@@ -393,6 +380,7 @@ const notePanelRenderer = new NotePanelRenderer({
   deleteButton: deleteNoteButton,
   toggleSizeButton: toggleNotesSizeButton,
 });
+const tabBarRenderer = new TabBarRenderer(tabList);
 
 window.addEventListener("DOMContentLoaded", async () => {
   document.body.append(addTabMenu);
@@ -608,7 +596,7 @@ async function retryLocalWebConnection() {
 }
 
 function handleTabWheel(event: WheelEvent) {
-  if (tabPointerState.draggedTabId !== null) return;
+  if (tabBarRenderer.isDragging) return;
   const result = tabWheelScroll({
     deltaX: event.deltaX,
     deltaY: event.deltaY,
@@ -1305,35 +1293,6 @@ async function moveTabs(tabIds: number[], targetIndex: number, draggedTabId: num
     resetInlineEdit();
     syncFileSelectionFromActiveTab();
     await loadFilesForActiveTab();
-  });
-}
-
-function highlightTabAt(clientX: number, sourceTabIds: number[]) {
-  clearTabDropHighlights();
-  const target = tabElementAt(clientX, sourceTabIds);
-  target?.classList.add("is-drop-target");
-}
-
-function targetTabIndexAt(clientX: number, sourceTabIds: number[]) {
-  const target = tabElementAt(clientX, sourceTabIds);
-  if (!target?.dataset.index) return null;
-  return Number(target.dataset.index);
-}
-
-function tabElementAt(clientX: number, sourceTabIds: number[]) {
-  const tabs = Array.from(tabList.querySelectorAll<HTMLElement>(".tab-item"));
-  return (
-    tabs.find((node) => {
-      if (sourceTabIds.includes(Number(node.dataset.tabId))) return false;
-      const rect = node.getBoundingClientRect();
-      return clientX >= rect.left && clientX <= rect.right;
-    }) ?? null
-  );
-}
-
-function clearTabDropHighlights() {
-  tabList.querySelectorAll(".is-drop-target").forEach((node) => {
-    node.classList.remove("is-drop-target");
   });
 }
 
@@ -2216,66 +2175,6 @@ function renderInlineProjectField(
   container.replaceChildren(input);
 }
 
-function renderInlineTabName(tab: TabDto) {
-  if (
-    inlineEditState.field !== "tabName" ||
-    activeTabId !== tab.id ||
-    tabNameEditSurface !== "tab-bar"
-  ) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "tab-button";
-    button.title = `${tabKindLabel(tab.kind)}: ${tab.name}`;
-    const icon = createLucideElement(tab.kind === "folder" ? FolderIcon : LinkIcon, {
-      width: 16,
-      height: 16,
-      class: "tab-kind-icon",
-      "aria-hidden": "true",
-    });
-    const label = document.createElement("span");
-    label.className = "tab-name-label";
-    label.textContent = tab.name;
-    button.append(icon, label);
-    if (tabSelection.selectedIds.length > 1 && tabSelection.selectedIds.includes(tab.id)) {
-      button.append(
-        createLucideElement(CheckIcon, {
-          width: 14,
-          height: 14,
-          class: "tab-selection-icon",
-          "aria-label": "Selected",
-        }),
-      );
-    }
-    return button;
-  }
-
-  const input = document.createElement("input");
-  input.className = "inline-editor tab-inline-editor";
-  input.dataset.inlineField = "tabName";
-  input.value = inlineEditState.draft;
-  input.addEventListener("input", () => {
-    inlineEditState = {
-      ...inlineEditState,
-      draft: input.value,
-    };
-  });
-  input.addEventListener("keydown", async (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      await commitTabInlineEdit(input.value);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      await commitTabInlineEdit(input.value, true);
-    }
-  });
-  input.addEventListener("blur", async () => {
-    if (inlineEditState.field === "tabName") {
-      await commitTabInlineEdit(input.value);
-    }
-  });
-  return input;
-}
-
 function renderActiveTabName(tab: TabDto | null) {
   if (!tab) {
     activeTabName.textContent = "None";
@@ -2671,122 +2570,31 @@ function tabInlineValue(tab: TabDto, field: InlineEditField) {
 function renderTabs() {
   const project = activeProject();
   const tabs = project ? tabsForProject(project.id) : [];
-  tabList.replaceChildren(
-    ...tabs.map((tab, index) => {
-      const item = document.createElement("div");
-      item.className = tab.id === activeTabId ? "tab-item is-active" : "tab-item";
-      item.classList.toggle("is-selected", tabSelection.selectedIds.includes(tab.id));
-      item.dataset.tabId = String(tab.id);
-      item.dataset.index = String(index);
-      item.dataset.tabKind = tab.kind;
-      item.addEventListener("mousedown", (event) => {
-        const hasSelectionModifier = event.ctrlKey || event.metaKey || event.shiftKey;
-        if (
-          !hasSelectionModifier &&
-          shouldStartTabNameEditFromMouseDown(
-            Boolean((event.target as HTMLElement).closest(".tab-button")),
-            event.detail,
-            inlineEditState.field === "tabName" && activeTabId === tab.id,
-          )
-        ) {
-          event.preventDefault();
-          event.stopPropagation();
-          tabPointerState = initialTabPointerState();
-          startTabInlineEdit("tabName", tab.id);
-        }
-      });
-      item.addEventListener("pointerdown", async (event) => {
-        if (event.button !== 0) return;
-        const hasSelectionModifier = event.ctrlKey || event.metaKey || event.shiftKey;
-        const isInlineEditorTarget = Boolean(
-          (event.target as HTMLElement).closest(".inline-editor"),
-        );
-        if (isInlineEditorTarget) return;
-        if (
-          shouldFinishInlineEditBeforeTabPointerInteraction(
-            inlineEditState.field !== null,
-            isInlineEditorTarget,
-          )
-        ) {
-          event.preventDefault();
-          event.stopPropagation();
-          const finished = await finishCurrentInlineEdit();
-          if (finished && tab.id !== activeTabId) {
-            await activateTab(tab.id);
-          }
-          return;
-        }
-        if (hasSelectionModifier) {
-          event.preventDefault();
-          tabSelection = applyMultiSelection(
-            tabSelection,
-            tabs.map((candidate) => candidate.id),
-            tab.id,
-            {
-              ctrlKey: event.ctrlKey || event.metaKey,
-              shiftKey: event.shiftKey,
-            },
-          );
-          await activateTab(tab.id);
-          return;
-        }
-        if (!tabSelection.selectedIds.includes(tab.id)) {
-          tabSelection = { selectedIds: [tab.id], anchorId: tab.id };
-          syncTabSelectionClasses();
-        }
-        tabPointerState = startTabPointerDrag(tab.id, event.clientX, event.clientY);
-        item.setPointerCapture(event.pointerId);
-      });
-      item.addEventListener("pointermove", (event) => {
-        if (tabPointerState.draggedTabId !== tab.id) return;
-        const nextState = updateTabPointerDrag(tabPointerState, event.clientX, event.clientY);
-        tabPointerState = nextState;
-        if (!tabPointerState.moved) return;
-        item.classList.add("is-dragging");
-        markSelectedTabsDragging(true);
-        item.style.transform = `translate3d(${tabPointerState.deltaX}px, -4px, 0) scale(1.03)`;
-        highlightTabAt(event.clientX, tabSelection.selectedIds);
-      });
-      item.addEventListener("pointerup", async (event) => {
-        if (tabPointerState.draggedTabId !== tab.id) return;
-        item.releasePointerCapture(event.pointerId);
-        item.classList.remove("is-dragging");
-        markSelectedTabsDragging(false);
-        item.style.transform = "";
-        const targetIndex = targetTabIndexAt(event.clientX, tabSelection.selectedIds);
-        clearTabDropHighlights();
-        const result = finishTabPointerDrag(tabPointerState, tab.id, targetIndex);
-        tabPointerState = result.state;
-        if (result.action.type === "move") {
-          await moveTabs(
-            tabSelection.selectedIds,
-            result.action.targetIndex,
-            result.action.tabId,
-          );
-        } else if (result.action.type === "activate") {
-          tabSelection = { selectedIds: [result.action.tabId], anchorId: result.action.tabId };
-          if (shouldActivateReleasedTab(result.action, activeTabId)) {
-            await activateTab(result.action.tabId);
-          } else {
-            render();
-          }
-        }
-      });
-      item.addEventListener("pointercancel", () => {
-        tabPointerState = initialTabPointerState();
-        item.classList.remove("is-dragging");
-        markSelectedTabsDragging(false);
-        item.style.transform = "";
-        clearTabDropHighlights();
-      });
-      item.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        openTabContextMenu(tab.id, event.clientX, event.clientY);
-      });
-
-      item.append(renderInlineTabName(tab));
-      return item;
-    }),
+  tabBarRenderer.render(
+    {
+      tabs,
+      activeTabId,
+      selection: tabSelection,
+      inlineEdit: inlineEditState,
+      editSurface: tabNameEditSurface,
+    },
+    {
+      getActiveTabId: () => activeTabId,
+      getSelection: () => tabSelection,
+      setSelection: (selection) => { tabSelection = selection; },
+      startNameEdit: (tabId) => startTabInlineEdit("tabName", tabId),
+      updateDraft: (value) => { inlineEditState = { ...inlineEditState, draft: value }; },
+      commitEdit: commitTabInlineEdit,
+      isNameEditing: (tabId) =>
+        inlineEditState.field === "tabName" &&
+        activeTabId === tabId &&
+        tabNameEditSurface === "tab-bar",
+      finishCurrentEdit: finishCurrentInlineEdit,
+      activate: activateTab,
+      move: moveTabs,
+      openContextMenu: openTabContextMenu,
+      render,
+    },
   );
 }
 
@@ -2946,25 +2754,10 @@ function renderRecent() {
   );
 }
 
-function syncTabSelectionClasses() {
-  tabList.querySelectorAll<HTMLElement>(".tab-item").forEach((item) => {
-    item.classList.toggle(
-      "is-selected",
-      tabSelection.selectedIds.includes(Number(item.dataset.tabId)),
-    );
-  });
-}
-
 function resetTabSelectionToActive() {
   tabSelection = activeTabId === null
     ? emptyMultiSelection()
     : { selectedIds: [activeTabId], anchorId: activeTabId };
-}
-
-function markSelectedTabsDragging(dragging: boolean) {
-  tabList.querySelectorAll<HTMLElement>(".tab-item.is-selected").forEach((item) => {
-    item.classList.toggle("is-group-dragging", dragging);
-  });
 }
 
 function renderLinks() {
