@@ -2,6 +2,7 @@
 /outputs/
 /work/
 **/.e2e-runtime/
+**/.e2e-restart-runtime/
 **/test-results/
 **/playwright-report/
 /.agents/

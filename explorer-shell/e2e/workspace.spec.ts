@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { rmSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 test("creates, edits, switches, and reorders workspace tabs", async ({ page }) => {
   await page.goto("/");
@@ -154,4 +156,44 @@ test("creates, edits, switches, and reorders workspace tabs", async ({ page }) =
     "First Project",
     "Edited While Inactive",
   ]);
+});
+
+test("shows folder contents, previews files, and reacts to external changes", async ({ page }) => {
+  const fixture = resolve(".e2e-runtime", "fixture");
+  const gammaPath = resolve(fixture, "gamma.txt");
+  const betaPath = resolve(fixture, "beta.md");
+
+  await page.goto("/");
+  await page.locator("#project-name").fill("Folder E2E");
+  await page.getByRole("button", { name: "Add Project" }).click();
+
+  await page.locator("#active-tab-path").dblclick();
+  const folderEditor = page.locator('input[data-inline-field="tabFolder"]');
+  await expect(folderEditor).toBeVisible();
+  await folderEditor.fill(fixture);
+  await folderEditor.press("Enter");
+
+  await expect(page.locator(".file-row")).toHaveCount(3);
+  await expect(page.locator(".file-row.is-dir")).toHaveCount(1);
+  await expect(page.locator(".file-row .file-check")).toHaveCount(3);
+
+  const alpha = page.locator(".file-row").filter({ hasText: "alpha.txt" });
+  const beta = page.locator(".file-row").filter({ hasText: "beta.md" });
+  await alpha.click();
+  await expect(alpha).toHaveClass(/is-current/);
+  await expect(page.locator("#preview-content")).toContainText("Alpha preview content");
+
+  await alpha.locator(".file-check").click();
+  await beta.locator(".file-check").click();
+  await expect(page.locator(".file-row.is-checked")).toHaveCount(2);
+  await expect(page.locator("#checked-paths")).toContainText("2 items checked");
+
+  writeFileSync(gammaPath, "Gamma added outside WorkspaceTabs\n", "utf8");
+  await expect(page.locator(".file-row").filter({ hasText: "gamma.txt" })).toBeVisible();
+
+  await beta.click();
+  await expect(page.locator("#selected-path")).toContainText("beta.md");
+  rmSync(betaPath);
+  await expect(beta).toHaveCount(0);
+  await expect(page.locator("#selected-path")).toHaveText("None");
 });
