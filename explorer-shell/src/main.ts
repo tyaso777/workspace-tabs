@@ -60,8 +60,6 @@ import {
   File as FileIcon,
   Link as LinkIcon,
   Check as CheckIcon,
-  Maximize2 as MaximizeIcon,
-  Minimize2 as RestoreIcon,
   createElement as createLucideElement,
 } from "lucide";
 import {
@@ -72,16 +70,14 @@ import {
 } from "./projectMenu";
 import {
   activeNoteForProject,
-  notePanelView,
   notesForProject,
 } from "./notePanel";
 import { NotePanelController } from "./notePanelController";
 import {
   noteContextSelection,
   noteDeleteMenuLabel,
-  shouldFinishNoteEditBeforeSelection,
-  shouldStartNoteTitleEditFromPointerDown,
 } from "./notePointer";
+import { NotePanelRenderer } from "./notePanelRenderer";
 import {
   applyMultiSelection,
   emptyMultiSelection,
@@ -242,8 +238,6 @@ let projectSelection: MultiSelectionState = emptyMultiSelection();
 let noteSelection: MultiSelectionState = emptyMultiSelection();
 let tabSelection: MultiSelectionState = emptyMultiSelection();
 let noteInteractionQueue: Promise<void> = Promise.resolve();
-let suppressNoteClickId: number | null = null;
-let suppressNoteContextMenuId: number | null = null;
 let folderRefreshTimer: number | null = null;
 let fileTooltipTimer: number | null = null;
 let projectMenuProjectId: number | null = null;
@@ -381,6 +375,18 @@ const notePanelController = new NotePanelController({
   setResizing: (resizing) => {
     notesPanel.classList.toggle("is-resizing", resizing);
   },
+});
+
+const notePanelRenderer = new NotePanelRenderer({
+  panel: notesPanel,
+  count: notesCount,
+  list: noteList,
+  detail: noteDetail,
+  title: activeNoteTitle,
+  content: activeNoteContent,
+  addButton: addNoteButton,
+  deleteButton: deleteNoteButton,
+  toggleSizeButton: toggleNotesSizeButton,
 });
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -2654,185 +2660,32 @@ function renderNotes() {
   const project = activeProject();
   const projectNotes = project ? notesForProject(workspace.notes, project.id) : [];
   const note = activeNote();
-  const view = notePanelView(notePanelController.state);
-
-  const resizing = notesPanel.classList.contains("is-resizing");
-  notesPanel.className = `${view.className}${resizing ? " is-resizing" : ""}`;
-  notesCount.textContent = `(${projectNotes.length})`;
-  toggleNotesSizeButton.replaceChildren(
-    createLucideElement(notePanelController.state.maximized ? RestoreIcon : MaximizeIcon, {
-      width: 17,
-      height: 17,
-      "aria-hidden": "true",
-    }),
+  notePanelRenderer.render(
+    {
+      hasProject: Boolean(project),
+      notes: projectNotes,
+      activeNote: note,
+      selectedIds: noteSelection.selectedIds,
+      panelState: notePanelController.state,
+      inlineEdit: inlineEditState,
+      editingNoteId,
+    },
+    {
+      applyHeight: applyNotePanelHeight,
+      enqueue: enqueueNoteInteraction,
+      finishCurrentEdit: finishCurrentInlineEdit,
+      selectFromPointer: selectNoteFromPointer,
+      startTitleEditFromList: startNoteTitleEditFromList,
+      prepareContextMenu: prepareNoteContextMenu,
+      startEdit: startNoteInlineEdit,
+      updateDraft: (value) => {
+        inlineEditState = { ...inlineEditState, draft: value };
+      },
+      commitEdit: commitNoteInlineEdit,
+      isEditing: (noteId, field) =>
+        inlineEditState.field === field && editingNoteId === noteId,
+    },
   );
-  toggleNotesSizeButton.title = view.toggleTitle;
-  toggleNotesSizeButton.setAttribute("aria-label", view.toggleTitle);
-  addNoteButton.disabled = !project;
-  deleteNoteButton.disabled = !note;
-  applyNotePanelHeight();
-
-  noteList.replaceChildren(
-    ...projectNotes.map((candidate) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "note-list-item";
-      button.classList.toggle("is-active", candidate.id === note?.id);
-      button.classList.toggle("is-selected", noteSelection.selectedIds.includes(candidate.id));
-      button.setAttribute("aria-pressed", String(noteSelection.selectedIds.includes(candidate.id)));
-      button.title = candidate.title;
-      const title = document.createElement("span");
-      title.className = "note-list-title";
-      title.textContent = candidate.title;
-      const selectionIndicator = document.createElement("span");
-      selectionIndicator.className = "selection-indicator";
-      selectionIndicator.textContent = noteSelection.selectedIds.includes(candidate.id) ? "✓" : "";
-      selectionIndicator.setAttribute("aria-hidden", "true");
-      button.append(title, selectionIndicator);
-      button.addEventListener("mousedown", (event) => {
-        if (event.button === 2 && inlineEditState.field !== null) {
-          event.preventDefault();
-          event.stopPropagation();
-          suppressNoteContextMenuId = candidate.id;
-          enqueueNoteInteraction(() =>
-            prepareNoteContextMenu(candidate.id, event.clientX, event.clientY),
-          );
-          return;
-        }
-        if (event.button !== 0) return;
-        const hasSelectionModifier = event.ctrlKey || event.metaKey || event.shiftKey;
-        const shouldStartEdit = shouldStartNoteTitleEditFromPointerDown(
-          true,
-          event.detail,
-          hasSelectionModifier,
-        );
-        if (shouldFinishNoteEditBeforeSelection(inlineEditState.field !== null, false)) {
-          const selectionEvent = {
-            ctrlKey: event.ctrlKey,
-            metaKey: event.metaKey,
-            shiftKey: event.shiftKey,
-          };
-          event.preventDefault();
-          event.stopPropagation();
-          suppressNoteClickId = candidate.id;
-          enqueueNoteInteraction(async () => {
-            if (!(await finishCurrentInlineEdit())) return;
-            await selectNoteFromPointer(candidate.id, selectionEvent);
-            if (shouldStartEdit) await startNoteTitleEditFromList(candidate.id);
-          });
-          return;
-        }
-        if (!shouldStartEdit) return;
-        event.preventDefault();
-        event.stopPropagation();
-        suppressNoteClickId = candidate.id;
-        enqueueNoteInteraction(() => startNoteTitleEditFromList(candidate.id));
-      });
-      button.addEventListener("click", (event) => {
-        if (suppressNoteClickId === candidate.id) {
-          suppressNoteClickId = null;
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        suppressNoteClickId = null;
-        enqueueNoteInteraction(() => selectNoteFromPointer(candidate.id, event));
-      });
-      button.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (suppressNoteContextMenuId === candidate.id) {
-          suppressNoteContextMenuId = null;
-          return;
-        }
-        enqueueNoteInteraction(() =>
-          prepareNoteContextMenu(candidate.id, event.clientX, event.clientY),
-        );
-      });
-      return button;
-    }),
-  );
-
-  noteDetail.classList.toggle("is-empty", !note);
-  if (!note) {
-    activeNoteTitle.textContent = "No notes";
-    activeNoteTitle.title = "";
-    activeNoteContent.textContent = "No content";
-    activeNoteContent.title = "";
-    return;
-  }
-
-  renderActiveNoteTitle(note);
-  renderActiveNoteContent(note);
-}
-
-function renderActiveNoteTitle(note: NoteDto) {
-  if (inlineEditState.field !== "noteTitle" || editingNoteId !== note.id) {
-    activeNoteTitle.textContent = note.title;
-    activeNoteTitle.title = "Double-click to edit note title";
-    activeNoteTitle.ondblclick = () => startNoteInlineEdit("noteTitle");
-    return;
-  }
-
-  activeNoteTitle.title = "";
-  activeNoteTitle.ondblclick = null;
-  const input = document.createElement("input");
-  input.className = "inline-editor note-title-editor";
-  input.dataset.inlineField = "noteTitle";
-  input.value = inlineEditState.draft;
-  input.addEventListener("input", () => {
-    inlineEditState = { ...inlineEditState, draft: input.value };
-  });
-  input.addEventListener("keydown", async (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      await commitNoteInlineEdit(input.value);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      await commitNoteInlineEdit(input.value, true);
-    }
-  });
-  input.addEventListener("blur", async () => {
-    if (inlineEditState.field === "noteTitle" && editingNoteId === note.id) {
-      await commitNoteInlineEdit(input.value);
-    }
-  });
-  activeNoteTitle.replaceChildren(input);
-}
-
-function renderActiveNoteContent(note: NoteDto) {
-  if (inlineEditState.field !== "noteContent" || editingNoteId !== note.id) {
-    activeNoteContent.textContent = note.content || "No content";
-    activeNoteContent.classList.toggle("is-empty", note.content.length === 0);
-    activeNoteContent.title = "Double-click to edit note content";
-    activeNoteContent.ondblclick = () => startNoteInlineEdit("noteContent");
-    return;
-  }
-
-  activeNoteContent.title = "";
-  activeNoteContent.ondblclick = null;
-  const textarea = document.createElement("textarea");
-  textarea.className = "inline-editor note-content-editor";
-  textarea.dataset.inlineField = "noteContent";
-  textarea.value = inlineEditState.draft;
-  textarea.addEventListener("input", () => {
-    inlineEditState = { ...inlineEditState, draft: textarea.value };
-  });
-  textarea.addEventListener("keydown", async (event) => {
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault();
-      await commitNoteInlineEdit(textarea.value);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      await commitNoteInlineEdit(textarea.value, true);
-    }
-  });
-  textarea.addEventListener("blur", async () => {
-    if (inlineEditState.field === "noteContent" && editingNoteId === note.id) {
-      await commitNoteInlineEdit(textarea.value);
-    }
-  });
-  activeNoteContent.replaceChildren(textarea);
 }
 
 function tabInlineValue(tab: TabDto, field: InlineEditField) {
