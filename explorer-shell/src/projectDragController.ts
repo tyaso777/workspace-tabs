@@ -47,19 +47,19 @@ export class ProjectDragController {
         ? [...state.selection.selectedIds]
         : [projectId];
       this.#pointerState = startProjectPointerDrag(projectId, event.clientY);
-      item.setPointerCapture(event.pointerId);
     });
     item.addEventListener("pointermove", (event) => {
       if (this.#pointerState.projectId !== projectId) return;
       this.#pointerState = updateProjectPointerDrag(this.#pointerState, event.clientY);
       if (!this.#pointerState.moved) return;
+      if (!item.hasPointerCapture(event.pointerId)) item.setPointerCapture(event.pointerId);
       item.classList.add("is-dragging");
       item.style.transform = `translateY(${this.#pointerState.deltaY}px) scale(1.02)`;
       this.#showDropIndicator(event.clientY);
     });
     item.addEventListener("pointerup", async (event) => {
       if (this.#pointerState.projectId !== projectId) return;
-      item.releasePointerCapture(event.pointerId);
+      if (item.hasPointerCapture(event.pointerId)) item.releasePointerCapture(event.pointerId);
       const moved = this.#pointerState.moved;
       const target = this.#dropTargetAt(event.clientY);
       this.#reset(item);

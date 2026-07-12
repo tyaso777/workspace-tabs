@@ -5,6 +5,7 @@ import { ProjectDragController } from "./projectDragController";
 
 function projectItem(id: number, top: number) {
   const item = document.createElement("div");
+  let capturedPointerId: number | null = null;
   item.className = "project-item";
   item.dataset.projectId = String(id);
   item.getBoundingClientRect = () => ({
@@ -12,8 +13,9 @@ function projectItem(id: number, top: number) {
     toJSON: () => ({}),
   });
   Object.assign(item, {
-    setPointerCapture: vi.fn(),
-    releasePointerCapture: vi.fn(),
+    hasPointerCapture: vi.fn((pointerId: number) => capturedPointerId === pointerId),
+    setPointerCapture: vi.fn((pointerId: number) => { capturedPointerId = pointerId; }),
+    releasePointerCapture: vi.fn(() => { capturedPointerId = null; }),
   });
   return item;
 }
@@ -44,7 +46,9 @@ describe("ProjectDragController DOM", () => {
     controller.bind(first, 1);
 
     first.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0, clientY: 0 }));
+    expect(first.setPointerCapture).not.toHaveBeenCalled();
     first.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientY: 30 }));
+    expect(first.setPointerCapture).toHaveBeenCalledOnce();
     expect(second.classList.contains("is-drop-after")).toBe(true);
     first.dispatchEvent(new MouseEvent("pointerup", { bubbles: true, clientY: 30 }));
     await Promise.resolve();

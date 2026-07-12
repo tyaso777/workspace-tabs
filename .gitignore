@@ -1,6 +1,9 @@
 # Private runtime data and release artifacts
 /outputs/
 /work/
+**/.e2e-runtime/
+**/test-results/
+**/playwright-report/
 /.agents/
 /.codex/
 

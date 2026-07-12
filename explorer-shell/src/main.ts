@@ -783,6 +783,10 @@ function startProjectInlineEdit(
   resetTabSelectionToActive();
   editingProjectId = project.id;
   projectEditSurface = surface;
+  if (surface === "project-list") {
+    suppressProjectClick = true;
+    window.setTimeout(() => { suppressProjectClick = false; }, 250);
+  }
   inlineEditState = startInlineEdit(field, projectInlineValue(project, field));
   syncFileSelectionFromActiveTab();
   render();
@@ -854,13 +858,11 @@ function focusActiveTabNameEditor() {
 }
 
 function focusProjectListEditor(projectId: number, field: InlineEditField) {
-  window.setTimeout(() => {
-    const input = projectList.querySelector<HTMLInputElement>(
-      `[data-project-id="${projectId}"] [data-inline-field="${field}"]`,
-    );
-    input?.focus();
-    input?.select();
-  }, 0);
+  const input = projectList.querySelector<HTMLInputElement>(
+    `[data-project-id="${projectId}"] [data-inline-field="${field}"]`,
+  );
+  input?.focus();
+  input?.select();
 }
 
 function resetInlineEdit() {
@@ -1164,10 +1166,17 @@ async function selectProjectFromPointer(projectId: number, event: MouseEvent) {
   const orderedIds = sortProjectsForDisplay(workspace.projects, projectSortMode).map(
     (project) => project.id,
   );
-  projectSelection = applyMultiSelection(projectSelection, orderedIds, projectId, {
+  const nextSelection = applyMultiSelection(projectSelection, orderedIds, projectId, {
     ctrlKey: event.ctrlKey || event.metaKey,
     shiftKey: event.shiftKey,
   });
+  const selectionUnchanged =
+    nextSelection.anchorId === projectSelection.anchorId &&
+    nextSelection.selectedIds.length === projectSelection.selectedIds.length &&
+    nextSelection.selectedIds.every((id, index) => id === projectSelection.selectedIds[index]);
+  if (activeProjectId === projectId && selectionUnchanged) return;
+
+  projectSelection = nextSelection;
   await activateProject(projectId);
   render();
 }
