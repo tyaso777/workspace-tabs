@@ -1277,31 +1277,15 @@ function clearTabDropHighlights() {
 }
 
 async function selectEntry(entry: FileEntryDto) {
-  await applyFileInteraction(
-    entry,
-    selectSingleFileEntry(fileSelectionState, { path: entry.path, isDir: entry.is_dir }),
-    false,
-  );
-}
-
-async function applyFileInteraction(
-  entry: FileEntryDto,
-  nextState: FileSelectionState,
-  checkedChanged: boolean,
-) {
   const project = activeProject();
   const tab = activeTab();
   if (!project || tab?.kind !== "folder") return;
 
   await runCommand(async () => {
-    fileSelectionState = nextState;
-    if (checkedChanged) {
-      workspace = await invoke<WorkspaceDto>("update_checked_paths", {
-        projectId: project.id,
-        tabId: tab.id,
-        paths: fileSelectionState.selectedPaths,
-      });
-    }
+    fileSelectionState = selectSingleFileEntry(fileSelectionState, {
+      path: entry.path,
+      isDir: entry.is_dir,
+    });
     workspace = await invoke<WorkspaceDto>("select_path", {
       projectId: project.id,
       tabId: tab.id,
@@ -1317,12 +1301,27 @@ async function applyFileInteraction(
   });
 }
 
+async function persistCheckedEntries(nextState: FileSelectionState) {
+  const project = activeProject();
+  const tab = activeTab();
+  if (!project || tab?.kind !== "folder") return;
+  fileSelectionState = nextState;
+  await runCommand(async () => {
+    workspace = await invoke<WorkspaceDto>("update_checked_paths", {
+      projectId: project.id,
+      tabId: tab.id,
+      paths: fileSelectionState.selectedPaths,
+    });
+    render();
+  });
+}
+
 async function toggleCheckedEntry(entry: FileEntryDto) {
   const nextState = toggleCheckedFileEntry(fileSelectionState, {
     path: entry.path,
     isDir: entry.is_dir,
   });
-  await applyFileInteraction(entry, nextState, true);
+  await persistCheckedEntries(nextState);
 }
 
 async function checkEntryRange(entry: FileEntryDto) {
@@ -1331,7 +1330,7 @@ async function checkEntryRange(entry: FileEntryDto) {
     files.map((candidate) => ({ path: candidate.path, isDir: candidate.is_dir })),
     { path: entry.path, isDir: entry.is_dir },
   );
-  await applyFileInteraction(entry, nextState, !entry.is_dir);
+  await persistCheckedEntries(nextState);
 }
 
 async function openEntry(entry: FileEntryDto) {
@@ -1810,10 +1809,15 @@ async function openCheckedFiles() {
 
   await runCommand(async () => {
     for (const path of paths) {
-      workspace = await invoke<WorkspaceDto>("open_file", {
-        projectId: project.id,
-        path,
-      });
+      const entry = files.find((candidate) => candidate.path === path);
+      if (entry?.is_dir) {
+        await invoke("open_folder", { folderPath: path });
+      } else {
+        workspace = await invoke<WorkspaceDto>("open_file", {
+          projectId: project.id,
+          path,
+        });
+      }
     }
     render();
   });
@@ -1883,7 +1887,6 @@ function syncFileSelectionFromActiveTab() {
     ...fileSelectionState,
     selectedPath,
     selectedPaths: tab?.kind === "folder" ? tab.checked_paths : [],
-    checkedAnchorPath: null,
   };
 }
 
@@ -2009,7 +2012,7 @@ function render() {
   addLinkButton.hidden = !isLinksTab;
   addLinksButton.hidden = !isLinksTab;
   openFolderButton.disabled = tab?.kind !== "folder" || !tab.folder_path;
-  openFilesButton.textContent = isLinksTab ? "Open Links" : "Open Files";
+  openFilesButton.textContent = isLinksTab ? "Open Links" : "Open Checked";
   openFilesButton.disabled = isLinksTab
     ? (tab?.checked_link_ids.length ?? 0) === 0
     : fileSelectionState.selectedPaths.length === 0;
@@ -2082,7 +2085,7 @@ function renderCheckedPaths() {
   }
 
   const summary = document.createElement("strong");
-  summary.textContent = `${fileSelectionState.selectedPaths.length} files checked`;
+  summary.textContent = `${fileSelectionState.selectedPaths.length} items checked`;
   const list = document.createElement("ul");
   list.className = "path-list";
   for (const path of fileSelectionState.selectedPaths) {
@@ -2937,9 +2940,7 @@ function renderFiles() {
         openEntry(entry);
       });
       button.addEventListener("click", (event) => {
-        if (entry.is_dir) {
-          void selectEntry(entry);
-        } else if (event.shiftKey) {
+        if (event.shiftKey) {
           void checkEntryRange(entry);
         } else if (event.ctrlKey || event.metaKey) {
           void toggleCheckedEntry(entry);

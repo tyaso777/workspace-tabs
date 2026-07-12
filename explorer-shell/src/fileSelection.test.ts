@@ -46,42 +46,46 @@ describe("file selection", () => {
     const third = toggleCheckedFileEntry(second, { path: "C:\\work\\a.txt", isDir: false });
 
     expect(second.selectedPaths).toEqual(["C:\\work\\a.txt", "C:\\work\\b.txt"]);
-    expect(second.selectedPath).toBe("C:\\work\\b.txt");
+    expect(second.selectedPath).toBe("C:\\work\\preview.txt");
     expect(third.selectedPaths).toEqual(["C:\\work\\b.txt"]);
   });
 
-  it("checks a continuous file range while ignoring folders", () => {
+  it("checks and unchecks a continuous range from Active including folders", () => {
     const entries = [
       { path: "C:\\work\\a.txt", isDir: false },
       { path: "C:\\work\\docs", isDir: true },
       { path: "C:\\work\\b.txt", isDir: false },
       { path: "C:\\work\\c.txt", isDir: false },
     ];
-    const anchored = toggleCheckedFileEntry(initialFileSelectionState(), entries[0]);
+    const anchored = selectSingleFileEntry(initialFileSelectionState(), entries[0]);
     const ranged = checkFileRange(anchored, entries, entries[3]);
 
     expect(ranged.selectedPaths).toEqual([
       "C:\\work\\a.txt",
+      "C:\\work\\docs",
       "C:\\work\\b.txt",
       "C:\\work\\c.txt",
     ]);
-    expect(ranged.selectedPath).toBe("C:\\work\\c.txt");
-    expect(ranged.checkedAnchorPath).toBe("C:\\work\\a.txt");
+    expect(ranged.selectedPath).toBe("C:\\work\\a.txt");
+
+    const unchecked = checkFileRange(ranged, entries, entries[3]);
+    expect(unchecked.selectedPaths).toEqual([]);
+    expect(unchecked.selectedPath).toBe("C:\\work\\a.txt");
   });
 
-  it("does not toggle folders into checked files", () => {
+  it("toggles folders without changing Active", () => {
     const state = toggleCheckedFileEntry(initialFileSelectionState(), {
       path: "C:\\work\\docs",
       isDir: true,
     });
 
-    expect(state.selectedPaths).toEqual([]);
+    expect(state.selectedPaths).toEqual(["C:\\work\\docs"]);
     expect(state.selectedPath).toBeNull();
   });
 
-  it("shows checkboxes only for files", () => {
+  it("shows checkboxes for files and folders", () => {
     expect(shouldShowSelectionCheckbox({ path: "C:\\work\\a.txt", isDir: false })).toBe(true);
-    expect(shouldShowSelectionCheckbox({ path: "C:\\work\\docs", isDir: true })).toBe(false);
+    expect(shouldShowSelectionCheckbox({ path: "C:\\work\\docs", isDir: true })).toBe(true);
   });
 
   it("uses the explicit Open button for files and folders", () => {
@@ -104,7 +108,6 @@ describe("file selection", () => {
     const state = {
       selectedPath: "C:\\work\\preview.txt",
       selectedPaths: ["C:\\work\\a.txt", "C:\\work\\b.txt"],
-      checkedAnchorPath: "C:\\work\\a.txt",
     };
 
     expect(previewTargetPath(state)).toBe("C:\\work\\preview.txt");

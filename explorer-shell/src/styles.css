@@ -1307,6 +1307,10 @@ button.is-active {
   background: #fbfcfd;
 }
 
+.file-row.is-dir.is-current {
+  background: #dceff6;
+}
+
 .link-row {
   flex: 0 0 auto;
   position: relative;

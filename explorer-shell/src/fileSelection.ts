@@ -1,7 +1,6 @@
 export type FileSelectionState = {
   selectedPath: string | null;
   selectedPaths: string[];
-  checkedAnchorPath: string | null;
 };
 
 export type FileSelectionEntry = {
@@ -13,7 +12,6 @@ export function initialFileSelectionState(): FileSelectionState {
   return {
     selectedPath: null,
     selectedPaths: [],
-    checkedAnchorPath: null,
   };
 }
 
@@ -24,7 +22,6 @@ export function selectSingleFileEntry(
   return {
     ...state,
     selectedPath: entry.path,
-    checkedAnchorPath: entry.isDir ? null : entry.path,
   };
 }
 
@@ -32,10 +29,6 @@ export function toggleCheckedFileEntry(
   state: FileSelectionState,
   entry: FileSelectionEntry,
 ): FileSelectionState {
-  if (entry.isDir) {
-    return state;
-  }
-
   const selected = new Set(state.selectedPaths);
   if (selected.has(entry.path)) {
     selected.delete(entry.path);
@@ -46,9 +39,7 @@ export function toggleCheckedFileEntry(
   const selectedPaths = Array.from(selected);
   return {
     ...state,
-    selectedPath: entry.path,
     selectedPaths,
-    checkedAnchorPath: entry.path,
   };
 }
 
@@ -57,28 +48,28 @@ export function checkFileRange(
   entries: FileSelectionEntry[],
   target: FileSelectionEntry,
 ): FileSelectionState {
-  if (target.isDir) return selectSingleFileEntry(state, target);
-  const files = entries.filter((entry) => !entry.isDir);
-  const anchorPath = state.checkedAnchorPath ?? target.path;
-  const anchorIndex = files.findIndex((entry) => entry.path === anchorPath);
-  const targetIndex = files.findIndex((entry) => entry.path === target.path);
+  const anchorPath = state.selectedPath ?? target.path;
+  const anchorIndex = entries.findIndex((entry) => entry.path === anchorPath);
+  const targetIndex = entries.findIndex((entry) => entry.path === target.path);
   if (anchorIndex < 0 || targetIndex < 0) {
-    return { ...state, selectedPath: target.path, checkedAnchorPath: target.path };
+    return toggleCheckedFileEntry(state, target);
   }
   const start = Math.min(anchorIndex, targetIndex);
   const end = Math.max(anchorIndex, targetIndex);
   const checked = new Set(state.selectedPaths);
-  files.slice(start, end + 1).forEach((entry) => checked.add(entry.path));
+  const shouldCheck = !checked.has(target.path);
+  entries.slice(start, end + 1).forEach((entry) => {
+    if (shouldCheck) checked.add(entry.path);
+    else checked.delete(entry.path);
+  });
   return {
     ...state,
-    selectedPath: target.path,
     selectedPaths: [...checked],
-    checkedAnchorPath: anchorPath,
   };
 }
 
 export function shouldShowSelectionCheckbox(entry: FileSelectionEntry) {
-  return !entry.isDir;
+  return Boolean(entry.path);
 }
 
 export function fileOpenAction(entry: FileSelectionEntry) {
@@ -99,10 +90,8 @@ export function pruneCheckedPaths(
   checkedPaths: string[],
   entries: FileSelectionEntry[],
 ): string[] {
-  const existingFiles = new Set(
-    entries.filter((entry) => !entry.isDir).map((entry) => entry.path),
-  );
-  return checkedPaths.filter((path) => existingFiles.has(path));
+  const existingPaths = new Set(entries.map((entry) => entry.path));
+  return checkedPaths.filter((path) => existingPaths.has(path));
 }
 
 export function pruneSelectedPath(
