@@ -49,6 +49,7 @@ import {
 import { ProjectDragController } from "./projectDragController";
 import { bindProjectItemInteractions } from "./projectItemInteractions";
 import { createProjectMenuButton } from "./projectMenuButton";
+import { ProjectListRenderer } from "./projectListRenderer";
 import { renderProjectListField as renderProjectListFieldElement } from "./projectListFieldRenderer";
 import {
   projectDeleteConfirmationForNames,
@@ -389,6 +390,11 @@ const activeHeaderRenderer = new ActiveHeaderRenderer({
   openFolderButton,
   addLinkButton,
   addLinksButton,
+});
+const projectListRenderer = new ProjectListRenderer(projectList, {
+  custom: sortCustomButton,
+  created: sortCreatedButton,
+  name: sortNameButton,
 });
 const projectDragController = new ProjectDragController(projectList, {
   getState: () => ({
@@ -2019,67 +2025,43 @@ function undoHintText(kind: WorkspaceDto["undo_kind"]) {
 
 
 function renderProjects() {
-  sortCustomButton.classList.toggle("is-active", projectSortMode === "custom");
-  sortCreatedButton.classList.toggle("is-active", projectSortMode === "created");
-  sortNameButton.classList.toggle("is-active", projectSortMode === "name");
-  sortCustomButton.setAttribute("aria-pressed", String(projectSortMode === "custom"));
-  sortCreatedButton.setAttribute("aria-pressed", String(projectSortMode === "created"));
-  sortNameButton.setAttribute("aria-pressed", String(projectSortMode === "name"));
-
-  projectList.replaceChildren(
-    ...sortProjectsForDisplay(workspace.projects, projectSortMode, projectCustomOrder).map((project) => {
-      const item = document.createElement("div");
-      item.className = "project-item";
-      item.classList.toggle("is-active", project.id === viewStateController.state.activeProjectId);
-      item.classList.toggle("is-selected", viewStateController.state.projectSelection.selectedIds.includes(project.id));
-      item.dataset.projectId = String(project.id);
-      item.tabIndex = 0;
-      item.setAttribute("role", "button");
-      item.setAttribute("aria-pressed", String(viewStateController.state.projectSelection.selectedIds.includes(project.id)));
-      item.classList.toggle("is-custom-sort", projectSortMode === "custom");
-      projectDragController.bind(item, project.id);
-      bindProjectItemInteractions(
-        item,
-        project.id,
-        {
-          hasActiveEdit: viewStateController.state.inlineEdit.field !== null,
-          editingThisItem:
-            viewStateController.state.projectEditSurface === "project-list" && viewStateController.state.editingProjectId === project.id,
-          suppressClick: () => {
-            if (!suppressProjectClick) return false;
-            suppressProjectClick = false;
-            return true;
-          },
+  projectListRenderer.render({
+    projects: workspace.projects,
+    activeProjectId: viewStateController.state.activeProjectId,
+    selectedIds: viewStateController.state.projectSelection.selectedIds,
+    sortMode: projectSortMode,
+    customOrder: projectCustomOrder,
+  }, {
+    bindDrag: (item, projectId) => projectDragController.bind(item, projectId),
+    bindInteractions: (item, projectId) => bindProjectItemInteractions(
+      item,
+      projectId,
+      {
+        hasActiveEdit: viewStateController.state.inlineEdit.field !== null,
+        editingThisItem:
+          viewStateController.state.projectEditSurface === "project-list" &&
+          viewStateController.state.editingProjectId === projectId,
+        suppressClick: () => {
+          if (!suppressProjectClick) return false;
+          suppressProjectClick = false;
+          return true;
         },
-        {
-          finishCurrentEdit: finishCurrentInlineEdit,
-          selectFromPointer: selectProjectFromPointer,
-          activate: activateProject,
-          openContextMenu: openProjectContextMenu,
-        },
-      );
-
-      const menuButton = createProjectMenuButton(
-        project.id,
-        project.name,
-        finishCurrentInlineEdit,
-        openProjectContextMenu,
-      );
-
-      const selectionIndicator = document.createElement("span");
-      selectionIndicator.className = "selection-indicator";
-      selectionIndicator.textContent = viewStateController.state.projectSelection.selectedIds.includes(project.id) ? "✓" : "";
-      selectionIndicator.setAttribute("aria-hidden", "true");
-
-      item.append(
-        renderProjectListField(project, "projectName"),
-        renderProjectListField(project, "projectSummary"),
-        selectionIndicator,
-        menuButton,
-      );
-      return item;
-    }),
-  );
+      },
+      {
+        finishCurrentEdit: finishCurrentInlineEdit,
+        selectFromPointer: selectProjectFromPointer,
+        activate: activateProject,
+        openContextMenu: openProjectContextMenu,
+      },
+    ),
+    renderField: (project, field) => renderProjectListField(project as ProjectDto, field),
+    createMenuButton: (project) => createProjectMenuButton(
+      project.id,
+      project.name,
+      finishCurrentInlineEdit,
+      openProjectContextMenu,
+    ),
+  });
 }
 
 function renderProjectListField(project: ProjectDto, field: InlineEditField) {
