@@ -79,6 +79,7 @@ import {
 } from "./notePointer";
 import { NotePanelRenderer } from "./notePanelRenderer";
 import { createNotesApi } from "./notesApi";
+import { createTabsApi } from "./tabsApi";
 import {
   applyMultiSelection,
   emptyMultiSelection,
@@ -207,6 +208,7 @@ type StorageInfoDto = {
 };
 
 const notesApi = createNotesApi<WorkspaceDto>(invoke);
+const tabsApi = createTabsApi<WorkspaceDto>(invoke);
 
 let workspace: WorkspaceDto = {
   projects: [],
@@ -1127,25 +1129,15 @@ async function addTab(kind: "folder" | "links") {
     const name = kind === "folder" ? DEFAULT_TAB_NAME : "New Links";
     workspace =
       kind === "folder"
-        ? await invoke<WorkspaceDto>("add_tab", {
-            projectId: project.id,
-            name,
-            folderPath: "",
-          })
-        : await invoke<WorkspaceDto>("add_links_tab", {
-            projectId: project.id,
-            name,
-          });
+        ? await tabsApi.addFolder(project.id, name, "")
+        : await tabsApi.addLinks(project.id, name);
     const projectTabs = tabsForProject(project.id);
     activeTabId = projectTabs[projectTabs.length - 1]?.id ?? null;
     tabSelection = activeTabId === null
       ? emptyMultiSelection()
       : { selectedIds: [activeTabId], anchorId: activeTabId };
     if (activeTabId !== null) {
-      workspace = await invoke<WorkspaceDto>("activate_tab", {
-        projectId: project.id,
-        tabId: activeTabId,
-      });
+      workspace = await tabsApi.activate(project.id, activeTabId);
     }
     previewText = "No preview";
     inlineEditState = startInlineEdit("tabName", name);
@@ -1189,10 +1181,7 @@ async function activateTab(tabId: number) {
   if (!project) return;
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("activate_tab", {
-      projectId: project.id,
-      tabId,
-    });
+    workspace = await tabsApi.activate(project.id, tabId);
     activeTabId = tabId;
     resetInlineEdit();
     syncFileSelectionFromActiveTab();
@@ -1246,17 +1235,13 @@ async function commitTabInlineEdit(value: string, cancel = false) {
     editingLink = null;
     workspace =
       result.field === "tabName"
-        ? await invoke<WorkspaceDto>("update_tab_name", {
-            projectId: project.id,
-            tabId: tab.id,
-            name: result.value,
-          })
-        : await invoke<WorkspaceDto>("update_tab", {
-            projectId: project.id,
-            tabId: tab.id,
-            name: tabNameAfterFolderChange(tab.name, result.value),
-            folderPath: result.value,
-          });
+        ? await tabsApi.rename(project.id, tab.id, result.value)
+        : await tabsApi.updateFolder(
+            project.id,
+            tab.id,
+            tabNameAfterFolderChange(tab.name, result.value),
+            result.value,
+          );
     resetInlineEdit();
     tabNameEditSurface = "tab-bar";
     previewText = "No preview";
@@ -1296,10 +1281,7 @@ async function deleteTabs(tabIds: number[]) {
   if (!project || tabIds.length === 0) return;
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("delete_tabs", {
-      projectId: project.id,
-      tabIds,
-    });
+    workspace = await tabsApi.deleteMany(project.id, tabIds);
     if (activeTabId !== null && tabIds.includes(activeTabId)) {
       activeTabId = activeProject()?.active_tab_id ?? tabsForProject(project.id)[0]?.id ?? null;
     }
@@ -1318,11 +1300,7 @@ async function moveTabs(tabIds: number[], targetIndex: number, draggedTabId: num
   if (!project) return;
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("move_tabs", {
-      projectId: project.id,
-      tabIds,
-      targetIndex,
-    });
+    workspace = await tabsApi.moveMany(project.id, tabIds, targetIndex);
     activeTabId = draggedTabId;
     resetInlineEdit();
     syncFileSelectionFromActiveTab();
