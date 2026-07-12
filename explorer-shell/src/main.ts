@@ -78,6 +78,7 @@ import {
   noteDeleteMenuLabel,
 } from "./notePointer";
 import { NotePanelRenderer } from "./notePanelRenderer";
+import { createNotesApi } from "./notesApi";
 import {
   applyMultiSelection,
   emptyMultiSelection,
@@ -204,6 +205,8 @@ type StorageInfoDto = {
   mode: "appdata" | "portable";
   database_path: string;
 };
+
+const notesApi = createNotesApi<WorkspaceDto>(invoke);
 
 let workspace: WorkspaceDto = {
   projects: [],
@@ -928,11 +931,7 @@ async function addNote() {
   if (!project) return;
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("add_note", {
-      projectId: project.id,
-      title: "New Note",
-      content: "",
-    });
+    workspace = await notesApi.add(project.id, "New Note", "");
     const note = activeNote();
     if (!note) return;
     noteSelection = { selectedIds: [note.id], anchorId: note.id };
@@ -974,12 +973,12 @@ async function commitNoteInlineEdit(value: string, cancel = false) {
   }
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("update_note", {
-      projectId: project.id,
-      noteId: note.id,
-      title: result.field === "noteTitle" ? result.value : note.title,
-      content: result.field === "noteContent" ? result.value : note.content,
-    });
+    workspace = await notesApi.update(
+      project.id,
+      note.id,
+      result.field === "noteTitle" ? result.value : note.title,
+      result.field === "noteContent" ? result.value : note.content,
+    );
     resetInlineEdit();
     render();
   });
@@ -991,10 +990,7 @@ async function activateNote(noteId: number) {
   if (!(await finishCurrentInlineEdit())) return;
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("activate_note", {
-      projectId: project.id,
-      noteId,
-    });
+    workspace = await notesApi.activate(project.id, noteId);
     render();
   });
 }
@@ -1063,10 +1059,10 @@ async function deleteNotes(noteIds: number[]) {
   if (!window.confirm(confirmation)) return;
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("delete_notes", {
-      projectId: project.id,
-      noteIds: notes.map((candidate) => candidate.id),
-    });
+    workspace = await notesApi.deleteMany(
+      project.id,
+      notes.map((candidate) => candidate.id),
+    );
     noteSelection = emptyMultiSelection();
     resetInlineEdit();
     render();
