@@ -22,6 +22,10 @@ import {
   type LinkInput,
 } from "./links";
 import { LinksRenderer } from "./linksRenderer";
+import {
+  WorkspaceViewStateController,
+  type WorkspaceViewState,
+} from "./workspaceViewStateController";
 import { shouldRunAppUndo } from "./keyboard";
 import {
   emptyTabFolderPrompt,
@@ -372,6 +376,7 @@ const notePanelRenderer = new NotePanelRenderer({
 const tabBarRenderer = new TabBarRenderer(tabList);
 const folderListRenderer = new FolderListRenderer(fileList);
 const linksRenderer = new LinksRenderer(fileList);
+const viewStateController = new WorkspaceViewStateController();
 const projectDragController = new ProjectDragController(projectList, {
   getState: () => ({
     sortMode: projectSortMode,
@@ -851,11 +856,45 @@ function focusProjectListEditor(projectId: number, field: InlineEditField) {
 }
 
 function resetInlineEdit() {
-  inlineEditState = emptyInlineEditState();
-  editingProjectId = null;
-  editingNoteId = null;
-  projectEditSurface = "active-header";
-  tabNameEditSurface = "tab-bar";
+  const editing = viewStateController.emptyEditingState();
+  inlineEditState = editing.inlineEdit;
+  editingProjectId = editing.editingProjectId;
+  editingNoteId = editing.editingNoteId;
+  projectEditSurface = editing.projectEditSurface;
+  tabNameEditSurface = editing.tabNameEditSurface;
+  editingLink = editing.editingLink;
+}
+
+function currentViewState(): WorkspaceViewState {
+  return {
+    activeProjectId,
+    activeTabId,
+    projectSelection,
+    noteSelection,
+    tabSelection,
+    fileSelection: fileSelectionState,
+    inlineEdit: inlineEditState,
+    editingProjectId,
+    editingNoteId,
+    projectEditSurface,
+    tabNameEditSurface,
+    editingLink,
+  };
+}
+
+function applyViewState(state: WorkspaceViewState) {
+  activeProjectId = state.activeProjectId;
+  activeTabId = state.activeTabId;
+  projectSelection = state.projectSelection;
+  noteSelection = state.noteSelection;
+  tabSelection = state.tabSelection;
+  fileSelectionState = state.fileSelection;
+  inlineEditState = state.inlineEdit;
+  editingProjectId = state.editingProjectId;
+  editingNoteId = state.editingNoteId;
+  projectEditSurface = state.projectEditSurface;
+  tabNameEditSurface = state.tabNameEditSurface;
+  editingLink = state.editingLink;
 }
 
 function requestActiveProjectDelete() {
@@ -1059,12 +1098,14 @@ async function undoLast() {
 
   await runCommand(async () => {
     workspace = await invoke<WorkspaceDto>("undo_last");
-    activeProjectId = workspace.restored_session?.project.id ?? workspace.projects[0]?.id ?? null;
-    activeTabId = workspace.restored_session?.active_tab?.id ?? activeProject()?.active_tab_id ?? null;
-    projectSelection = emptyMultiSelection();
-    noteSelection = emptyMultiSelection();
-    resetTabSelectionToActive();
-    resetInlineEdit();
+    const restoredProjectId = workspace.restored_session?.project.id ?? workspace.projects[0]?.id ?? null;
+    const restoredTabId = workspace.restored_session?.active_tab?.id ??
+      workspace.projects.find((project) => project.id === restoredProjectId)?.active_tab_id ?? null;
+    applyViewState(viewStateController.restoreAfterUndo(
+      currentViewState(),
+      restoredProjectId,
+      restoredTabId,
+    ));
     syncFileSelectionFromActiveTab();
     previewText = "No preview";
     await loadFilesForActiveTab();
@@ -1131,17 +1172,9 @@ async function addTab(kind: "folder" | "links") {
 }
 
 async function activateProject(projectId: number, shouldRender = true) {
-  const projectChanged = activeProjectId !== projectId;
-  activeProjectId = projectId;
-  activeTabId = activeProject()?.active_tab_id ?? tabsForProject(projectId)[0]?.id ?? null;
-  resetInlineEdit();
-  editingLink = null;
-  if (projectChanged) {
-    noteSelection = emptyMultiSelection();
-    tabSelection = activeTabId === null
-      ? emptyMultiSelection()
-      : { selectedIds: [activeTabId], anchorId: activeTabId };
-  }
+  const nextTabId = workspace.projects.find((project) => project.id === projectId)?.active_tab_id ??
+    tabsForProject(projectId)[0]?.id ?? null;
+  applyViewState(viewStateController.activateProject(currentViewState(), projectId, nextTabId));
   syncFileSelectionFromActiveTab();
   previewText = "No preview";
   await loadFilesForActiveTab(false);
@@ -1175,8 +1208,7 @@ async function activateTab(tabId: number) {
 
   await runCommand(async () => {
     workspace = await tabsApi.activate(project.id, tabId);
-    activeTabId = tabId;
-    resetInlineEdit();
+    applyViewState(viewStateController.activateTab(currentViewState(), tabId));
     syncFileSelectionFromActiveTab();
     previewText = "No preview";
     await loadFilesForActiveTab();
