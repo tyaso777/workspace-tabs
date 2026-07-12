@@ -50,6 +50,7 @@ import { ProjectDragController } from "./projectDragController";
 import { bindProjectItemInteractions } from "./projectItemInteractions";
 import { createProjectMenuButton } from "./projectMenuButton";
 import { ProjectListRenderer } from "./projectListRenderer";
+import { DialogManager } from "./dialogManager";
 import { renderProjectListField as renderProjectListFieldElement } from "./projectListFieldRenderer";
 import {
   projectDeleteConfirmationForNames,
@@ -214,9 +215,6 @@ let folderRefreshTimer: number | null = null;
 let fileTooltipTimer: number | null = null;
 let copiedLinkId: number | null = null;
 let linkSelectionQueue: Promise<void> = Promise.resolve();
-let pendingDeleteProjectIds: number[] = [];
-let pendingDeleteTabIds: number[] = [];
-let pendingDeleteLinkIds: number[] = [];
 let runtimeCloseInProgress = false;
 
 const applicationController = new WorkspaceApplicationController<WorkspaceDto>({
@@ -327,6 +325,14 @@ const closeRuntimeDialog = element<HTMLDialogElement>("#close-runtime-dialog");
 const closeRuntimeDialogTitle = element<HTMLElement>("#close-runtime-dialog-title");
 const closeRuntimeDialogDetail = element<HTMLElement>("#close-runtime-dialog-detail");
 const confirmCloseRuntimeButton = element<HTMLButtonElement>("#confirm-close-runtime-button");
+const dialogs = new DialogManager({
+  addLink: addLinkDialog,
+  addLinks: addLinksDialog,
+  deleteLink: deleteLinkDialog,
+  deleteProject: deleteProjectDialog,
+  deleteTab: deleteTabDialog,
+  closeRuntime: closeRuntimeDialog,
+});
 
 const contextMenus = new ContextMenuController({
   project: { menu: projectContextMenu, focusTarget: renameProjectMenuButton },
@@ -453,15 +459,6 @@ bootstrapWorkspaceApp({
   confirmDeleteLinkButton.addEventListener("click", confirmLinkDelete);
   confirmDeleteProjectButton.addEventListener("click", confirmProjectDelete);
   confirmDeleteTabButton.addEventListener("click", confirmTabDelete);
-  deleteProjectDialog.addEventListener("close", () => {
-    pendingDeleteProjectIds = [];
-  });
-  deleteTabDialog.addEventListener("close", () => {
-    pendingDeleteTabIds = [];
-  });
-  deleteLinkDialog.addEventListener("close", () => {
-    pendingDeleteLinkIds = [];
-  });
   document.addEventListener("pointerdown", (event) => {
     const target = event.target as HTMLElement;
     if (
@@ -565,11 +562,11 @@ async function requestRuntimeClose() {
   closeRuntimeDialogTitle.textContent = copy.title;
   closeRuntimeDialogDetail.textContent = copy.detail;
   confirmCloseRuntimeButton.textContent = copy.buttonLabel;
-  if (!closeRuntimeDialog.open) closeRuntimeDialog.showModal();
+  dialogs.open("closeRuntime");
 }
 
 async function confirmRuntimeClose() {
-  closeRuntimeDialog.close();
+  dialogs.close("closeRuntime");
   const isLocalWeb = currentRuntime() === "local-web";
   runtimeCloseInProgress = isLocalWeb;
   runtimeCloseButton.disabled = true;
@@ -899,20 +896,16 @@ function requestProjectDelete(projectIds: number[]) {
     .filter((project): project is ProjectDto => Boolean(project));
   if (projects.length === 0) return;
 
-  pendingDeleteProjectIds = projects.map((project) => project.id);
   const confirmation = projectDeleteConfirmationForNames(projects.map((project) => project.name));
   deleteProjectDialogTitle.textContent = confirmation.title;
   deleteProjectDialogDetail.textContent = confirmation.detail;
-  if (!deleteProjectDialog.open) {
-    deleteProjectDialog.showModal();
-  }
+  dialogs.open("deleteProject", projects.map((project) => project.id));
 }
 
 async function confirmProjectDelete() {
-  if (pendingDeleteProjectIds.length === 0) return;
-  const projectIds = [...pendingDeleteProjectIds];
-  pendingDeleteProjectIds = [];
-  deleteProjectDialog.close();
+  const projectIds = dialogs.consumeTargets("deleteProject");
+  if (projectIds.length === 0) return;
+  dialogs.close("deleteProject");
 
   await runCommand(async () => {
     workspace = await projectsApi.deleteMany(projectIds);
@@ -1416,18 +1409,16 @@ async function requestTabDeleteFromMenu() {
     tabIds.includes(tab.id),
   );
   if (tabs.length === 0) return;
-  pendingDeleteTabIds = tabs.map((tab) => tab.id);
   const confirmation = tabDeleteConfirmationForTabs(tabs);
   deleteTabDialogTitle.textContent = confirmation.title;
   deleteTabDialogDetail.textContent = confirmation.detail;
-  if (!deleteTabDialog.open) deleteTabDialog.showModal();
+  dialogs.open("deleteTab", tabs.map((tab) => tab.id));
 }
 
 async function confirmTabDelete() {
-  if (pendingDeleteTabIds.length === 0) return;
-  const tabIds = [...pendingDeleteTabIds];
-  pendingDeleteTabIds = [];
-  deleteTabDialog.close();
+  const tabIds = dialogs.consumeTargets("deleteTab");
+  if (tabIds.length === 0) return;
+  dialogs.close("deleteTab");
   await deleteTabs(tabIds);
 }
 
@@ -1442,7 +1433,7 @@ function showAddLinksDialog() {
   addLinksInput.value = "";
   addLinksError.hidden = true;
   addLinksError.textContent = "";
-  addLinksDialog.showModal();
+  dialogs.open("addLinks");
   addLinksInput.focus();
 }
 
@@ -1452,7 +1443,7 @@ function showAddLinkDialog() {
   addLinkUrl.value = "";
   addLinkError.hidden = true;
   addLinkError.textContent = "";
-  addLinkDialog.showModal();
+  dialogs.open("addLink");
   addLinkName.focus();
 }
 
@@ -1463,7 +1454,7 @@ async function confirmAddLink() {
     addLinkError.hidden = false;
     return;
   }
-  await addLinksToActiveTab([link], addLinkDialog);
+  await addLinksToActiveTab([link], "addLink");
 }
 
 async function confirmAddLinks() {
@@ -1476,10 +1467,10 @@ async function confirmAddLinks() {
     addLinksError.hidden = false;
     return;
   }
-  await addLinksToActiveTab(parsed.links, addLinksDialog);
+  await addLinksToActiveTab(parsed.links, "addLinks");
 }
 
-async function addLinksToActiveTab(links: LinkInput[], dialog: HTMLDialogElement) {
+async function addLinksToActiveTab(links: LinkInput[], dialog: "addLink" | "addLinks") {
   const project = activeProject();
   const tab = activeTab();
   if (!project || tab?.kind !== "links") return;
@@ -1489,7 +1480,7 @@ async function addLinksToActiveTab(links: LinkInput[], dialog: HTMLDialogElement
       tabId: tab.id,
       links,
     });
-    dialog.close();
+    dialogs.close(dialog);
     render();
   });
 }
@@ -1656,19 +1647,17 @@ async function deleteLinkFromMenu() {
 function requestLinkDelete(linkIds: number[]) {
   const links = linksForActiveTab().filter((link) => linkIds.includes(link.id));
   if (links.length === 0) return;
-  pendingDeleteLinkIds = links.map((link) => link.id);
   const confirmation = linkDeleteConfirmation(links);
   deleteLinkDialogTitle.textContent = confirmation.title;
   deleteLinkDialogDetail.textContent = confirmation.detail;
   confirmDeleteLinkButton.textContent = confirmation.buttonLabel;
-  if (!deleteLinkDialog.open) deleteLinkDialog.showModal();
+  dialogs.open("deleteLink", links.map((link) => link.id));
 }
 
 async function confirmLinkDelete() {
-  if (pendingDeleteLinkIds.length === 0) return;
-  const linkIds = [...pendingDeleteLinkIds];
-  pendingDeleteLinkIds = [];
-  deleteLinkDialog.close();
+  const linkIds = dialogs.consumeTargets("deleteLink");
+  if (linkIds.length === 0) return;
+  dialogs.close("deleteLink");
   await deleteLinks(linkIds);
 }
 
