@@ -73,6 +73,7 @@ import {
 import {
   DEFAULT_NOTE_PANEL_HEIGHT,
   clampNotePanelHeight,
+  expandedNotePanelHeight,
   activeNoteForProject,
   notePanelView,
   notesForProject,
@@ -677,13 +678,17 @@ function maximumNotePanelHeight() {
   return Math.max(150, window.innerHeight - notesPanel.getBoundingClientRect().top - 16);
 }
 
+function expandedNotesHeight() {
+  return expandedNotePanelHeight(window.innerHeight, notesPanel.getBoundingClientRect().top);
+}
+
 function currentNormalNotePanelHeight() {
   return notePanelState.customHeight ?? DEFAULT_NOTE_PANEL_HEIGHT;
 }
 
 function applyNotePanelHeight() {
   const requested = notePanelState.maximized
-    ? maximumNotePanelHeight()
+    ? expandedNotesHeight()
     : currentNormalNotePanelHeight();
   notesPanel.style.height = `${clampNotePanelHeight(requested, maximumNotePanelHeight())}px`;
 }

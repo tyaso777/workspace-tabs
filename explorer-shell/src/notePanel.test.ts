@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeNoteForProject,
   clampNotePanelHeight,
+  expandedNotePanelHeight,
   notePanelView,
   notesForProject,
   toggleNotePanelMaximized,
@@ -33,7 +34,7 @@ describe("notePanelView", () => {
   it("uses default mode when no custom height was saved", () => {
     expect(notePanelView({ customHeight: null, maximized: false })).toEqual({
       className: "notes-panel is-default",
-      toggleTitle: "Maximize Notes",
+      toggleTitle: "Expand Notes",
     });
   });
 
@@ -58,5 +59,15 @@ describe("clampNotePanelHeight", () => {
     expect(clampNotePanelHeight(80, 420)).toBe(150);
     expect(clampNotePanelHeight(300, 420)).toBe(300);
     expect(clampNotePanelHeight(700, 420)).toBe(420);
+  });
+});
+
+describe("expandedNotePanelHeight", () => {
+  it("leaves part of the workspace visible below Notes", () => {
+    expect(expandedNotePanelHeight(900, 180)).toBe(560);
+  });
+
+  it("keeps the panel usable in a short window", () => {
+    expect(expandedNotePanelHeight(360, 180)).toBe(150);
   });
 });

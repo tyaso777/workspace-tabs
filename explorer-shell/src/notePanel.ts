@@ -13,6 +13,7 @@ export type NotePanelState = {
 
 export const DEFAULT_NOTE_PANEL_HEIGHT = 190;
 export const MIN_NOTE_PANEL_HEIGHT = 150;
+export const EXPANDED_CONTENT_RESERVE = 160;
 
 export function notesForProject<T extends NoteView>(notes: T[], projectId: number): T[] {
   return notes
@@ -34,7 +35,7 @@ export function notePanelView(state: NotePanelState) {
     ? { className: "notes-panel is-maximized", toggleTitle: "Restore Notes Height" }
     : {
         className: state.customHeight === null ? "notes-panel is-default" : "notes-panel is-custom",
-        toggleTitle: "Maximize Notes",
+        toggleTitle: "Expand Notes",
       };
 }
 
@@ -47,4 +48,8 @@ export function clampNotePanelHeight(height: number, maximumHeight: number): num
     Math.max(height, MIN_NOTE_PANEL_HEIGHT),
     Math.max(MIN_NOTE_PANEL_HEIGHT, maximumHeight),
   );
+}
+
+export function expandedNotePanelHeight(viewportHeight: number, panelTop: number): number {
+  return Math.max(MIN_NOTE_PANEL_HEIGHT, viewportHeight - panelTop - EXPANDED_CONTENT_RESERVE);
 }
