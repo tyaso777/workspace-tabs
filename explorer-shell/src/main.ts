@@ -10,6 +10,7 @@ import {
   type FileSelectionState,
 } from "./fileSelection";
 import { FolderListRenderer } from "./folderListRenderer";
+import { ContextMenuController } from "./contextMenuController";
 import {
   linkDeleteConfirmation,
   linkIdsForDelete,
@@ -50,7 +51,6 @@ import {
   projectDeleteConfirmationForNames,
   projectDeleteMenuLabel,
   projectMenuEditField,
-  projectMenuPosition,
 } from "./projectMenu";
 import {
   activeNoteForProject,
@@ -219,10 +219,6 @@ let tabSelection: MultiSelectionState = emptyMultiSelection();
 let noteInteractionQueue: Promise<void> = Promise.resolve();
 let folderRefreshTimer: number | null = null;
 let fileTooltipTimer: number | null = null;
-let projectMenuProjectId: number | null = null;
-let noteMenuNoteId: number | null = null;
-let linkMenuLinkId: number | null = null;
-let tabMenuTabId: number | null = null;
 let editingLink: { id: number; field: "name" | "url" } | null = null;
 let copiedLinkId: number | null = null;
 let linkSelectionQueue: Promise<void> = Promise.resolve();
@@ -330,6 +326,13 @@ const closeRuntimeDialog = element<HTMLDialogElement>("#close-runtime-dialog");
 const closeRuntimeDialogTitle = element<HTMLElement>("#close-runtime-dialog-title");
 const closeRuntimeDialogDetail = element<HTMLElement>("#close-runtime-dialog-detail");
 const confirmCloseRuntimeButton = element<HTMLButtonElement>("#confirm-close-runtime-button");
+
+const contextMenus = new ContextMenuController({
+  project: { menu: projectContextMenu, focusTarget: renameProjectMenuButton },
+  tab: { menu: tabContextMenu, focusTarget: renameTabMenuButton },
+  note: { menu: noteContextMenu, focusTarget: editNoteTitleMenuButton },
+  link: { menu: linkContextMenu, focusTarget: editLinkNameMenuButton },
+});
 
 const notePanelController = new NotePanelController({
   load: async () => ({
@@ -444,18 +447,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   document.addEventListener("pointerdown", (event) => {
     const target = event.target as HTMLElement;
     if (
-      projectContextMenu.contains(target) ||
-      noteContextMenu.contains(target) ||
-      linkContextMenu.contains(target) ||
-      tabContextMenu.contains(target) ||
+      contextMenus.contains(target) ||
       addTabMenu.contains(target) ||
       target === addTabButton ||
       target.closest(".project-item-menu-button")
     ) return;
-    closeProjectContextMenu();
-    closeNoteContextMenu();
-    closeLinkContextMenu();
-    closeTabContextMenu();
+    contextMenus.closeAll();
     closeAddTabMenu();
   });
   document.addEventListener("keydown", (event) => {
@@ -473,17 +470,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     if (event.key !== "Escape") return;
-    closeProjectContextMenu();
-    closeNoteContextMenu();
-    closeLinkContextMenu();
-    closeTabContextMenu();
+    contextMenus.closeAll();
     closeAddTabMenu();
   });
   window.addEventListener("blur", () => {
-    closeProjectContextMenu();
-    closeNoteContextMenu();
-    closeLinkContextMenu();
-    closeTabContextMenu();
+    contextMenus.closeAll();
     closeAddTabMenu();
   });
 
@@ -874,8 +865,8 @@ function requestActiveProjectDelete() {
 }
 
 function requestProjectDeleteFromMenu() {
-  if (projectMenuProjectId === null) return;
-  const projectId = projectMenuProjectId;
+  const projectId = contextMenus.target("project");
+  if (projectId === null) return;
   closeProjectContextMenu();
   requestProjectDelete(projectIdsForDelete(projectId));
 }
@@ -1394,41 +1385,25 @@ async function openActiveFolder() {
 }
 
 function openTabContextMenu(tabId: number, pointerX: number, pointerY: number) {
-  closeProjectContextMenu();
-  closeNoteContextMenu();
-  closeLinkContextMenu();
-  tabMenuTabId = tabId;
   deleteTabMenuButton.textContent = tabDeleteMenuLabel(tabIdsForDelete(tabId).length);
-  tabContextMenu.hidden = false;
-  const position = projectMenuPosition({
-    pointerX,
-    pointerY,
-    menuWidth: tabContextMenu.offsetWidth,
-    menuHeight: tabContextMenu.offsetHeight,
-    viewportWidth: window.innerWidth,
-    viewportHeight: window.innerHeight,
-  });
-  tabContextMenu.style.left = `${position.left}px`;
-  tabContextMenu.style.top = `${position.top}px`;
-  renameTabMenuButton.focus();
+  contextMenus.open("tab", tabId, pointerX, pointerY);
 }
 
 function closeTabContextMenu() {
-  tabMenuTabId = null;
-  tabContextMenu.hidden = true;
+  contextMenus.close("tab");
 }
 
 async function renameTabFromMenu() {
-  if (tabMenuTabId === null) return;
-  const tabId = tabMenuTabId;
+  const tabId = contextMenus.target("tab");
+  if (tabId === null) return;
   closeTabContextMenu();
   if (!(await finishCurrentInlineEdit())) return;
   startTabInlineEdit("tabName", tabId);
 }
 
 async function requestTabDeleteFromMenu() {
-  if (tabMenuTabId === null) return;
-  const tabId = tabMenuTabId;
+  const tabId = contextMenus.target("tab");
+  if (tabId === null) return;
   closeTabContextMenu();
   if (!(await finishCurrentInlineEdit())) return;
   const tabIds = tabIdsForDelete(tabId);
@@ -1629,35 +1604,21 @@ async function commitLinkEdit(link: LinkDto, field: "name" | "url", value: strin
 }
 
 function openLinkContextMenu(link: LinkDto, pointerX: number, pointerY: number) {
-  closeProjectContextMenu();
-  closeNoteContextMenu();
-  linkMenuLinkId = link.id;
   const tab = activeTab();
   const deleteCount = tab?.kind === "links"
     ? linkIdsForDelete(link.id, tab.checked_link_ids).length
     : 1;
   deleteLinkMenuButton.textContent = deleteCount === 1 ? "Delete Link" : `Delete ${deleteCount} Links`;
-  linkContextMenu.hidden = false;
-  const position = projectMenuPosition({
-    pointerX,
-    pointerY,
-    menuWidth: linkContextMenu.offsetWidth,
-    menuHeight: linkContextMenu.offsetHeight,
-    viewportWidth: window.innerWidth,
-    viewportHeight: window.innerHeight,
-  });
-  linkContextMenu.style.left = `${position.left}px`;
-  linkContextMenu.style.top = `${position.top}px`;
-  editLinkNameMenuButton.focus();
+  contextMenus.open("link", link.id, pointerX, pointerY);
 }
 
 function closeLinkContextMenu() {
-  linkMenuLinkId = null;
-  linkContextMenu.hidden = true;
+  contextMenus.close("link");
 }
 
 function linkFromMenu() {
-  return workspace.links.find((link) => link.id === linkMenuLinkId) ?? null;
+  const linkId = contextMenus.target("link");
+  return workspace.links.find((link) => link.id === linkId) ?? null;
 }
 
 function editLinkFromMenu(field: "name" | "url") {
@@ -1738,8 +1699,8 @@ async function moveLink(linkId: number, targetIndex: number) {
 }
 
 async function editProjectFromMenu(action: "rename" | "description") {
-  if (projectMenuProjectId === null) return;
-  const projectId = projectMenuProjectId;
+  const projectId = contextMenus.target("project");
+  if (projectId === null) return;
   closeProjectContextMenu();
   if (!(await finishCurrentInlineEdit())) return;
   startProjectInlineEdit(projectMenuEditField(action), projectId, "project-list");
@@ -1751,37 +1712,19 @@ function openProjectContextMenu(
   pointerY: number,
   alignRight = false,
 ) {
-  closeNoteContextMenu();
-  projectMenuProjectId = projectId;
   deleteProjectMenuButton.textContent = projectDeleteMenuLabel(
     projectIdsForDelete(projectId).length,
   );
-  projectContextMenu.hidden = false;
-  const requestedLeft = alignRight ? pointerX - projectContextMenu.offsetWidth : pointerX;
-  projectContextMenu.style.left = `${requestedLeft}px`;
-  projectContextMenu.style.top = `${pointerY}px`;
-
-  const position = projectMenuPosition({
-    pointerX: requestedLeft,
-    pointerY,
-    menuWidth: projectContextMenu.offsetWidth,
-    menuHeight: projectContextMenu.offsetHeight,
-    viewportWidth: window.innerWidth,
-    viewportHeight: window.innerHeight,
-  });
-  projectContextMenu.style.left = `${position.left}px`;
-  projectContextMenu.style.top = `${position.top}px`;
-  renameProjectMenuButton.focus();
+  contextMenus.open("project", projectId, pointerX, pointerY, { alignRight });
 }
 
 function closeProjectContextMenu() {
-  projectMenuProjectId = null;
-  projectContextMenu.hidden = true;
+  contextMenus.close("project");
 }
 
 async function editNoteFromMenu(field: "noteTitle" | "noteContent") {
-  if (noteMenuNoteId === null) return;
-  const noteId = noteMenuNoteId;
+  const noteId = contextMenus.target("note");
+  if (noteId === null) return;
   closeNoteContextMenu();
   await activateNote(noteId);
   if (activeNote()?.id !== noteId) return;
@@ -1789,37 +1732,21 @@ async function editNoteFromMenu(field: "noteTitle" | "noteContent") {
 }
 
 async function deleteNotesFromMenu() {
-  if (noteMenuNoteId === null) return;
-  const noteIds = noteContextSelection(noteSelection.selectedIds, noteMenuNoteId);
+  const noteId = contextMenus.target("note");
+  if (noteId === null) return;
+  const noteIds = noteContextSelection(noteSelection.selectedIds, noteId);
   closeNoteContextMenu();
   await deleteNotes(noteIds);
 }
 
 function openNoteContextMenu(noteId: number, pointerX: number, pointerY: number) {
-  closeProjectContextMenu();
-  noteMenuNoteId = noteId;
   const noteIds = noteContextSelection(noteSelection.selectedIds, noteId);
   deleteNoteMenuButton.textContent = noteDeleteMenuLabel(noteIds.length);
-  noteContextMenu.hidden = false;
-  noteContextMenu.style.left = `${pointerX}px`;
-  noteContextMenu.style.top = `${pointerY}px`;
-
-  const position = projectMenuPosition({
-    pointerX,
-    pointerY,
-    menuWidth: noteContextMenu.offsetWidth,
-    menuHeight: noteContextMenu.offsetHeight,
-    viewportWidth: window.innerWidth,
-    viewportHeight: window.innerHeight,
-  });
-  noteContextMenu.style.left = `${position.left}px`;
-  noteContextMenu.style.top = `${position.top}px`;
-  editNoteTitleMenuButton.focus();
+  contextMenus.open("note", noteId, pointerX, pointerY);
 }
 
 function closeNoteContextMenu() {
-  noteMenuNoteId = null;
-  noteContextMenu.hidden = true;
+  contextMenus.close("note");
 }
 
 async function openCheckedFiles() {
