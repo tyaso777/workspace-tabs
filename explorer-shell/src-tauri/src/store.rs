@@ -1104,4 +1104,74 @@ mod tests {
         assert_eq!(store.load_notes_custom_height().unwrap(), None);
         assert!(!store.load_notes_maximized().unwrap());
     }
+
+    #[test]
+    fn disk_database_restores_workspace_and_all_ui_preferences_after_reopen() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "workspace-tabs-reopen-{}-{unique}",
+            std::process::id()
+        ));
+        let database_path = directory.join("workspace.sqlite3");
+
+        let (project_id, tab_id) = {
+            let mut store = SqliteWorkspaceStore::open(&database_path).unwrap();
+            let mut workspace = Workspace::new();
+            let project_id = workspace.create_project("Persistent", "restart test").unwrap();
+            let tab_id = workspace.add_tab(project_id, "Docs", r"C:\work\docs").unwrap();
+            workspace.activate_tab(project_id, tab_id).unwrap();
+            workspace
+                .select_path(project_id, tab_id, r"C:\work\docs\selected.txt")
+                .unwrap();
+            workspace
+                .update_checked_paths(
+                    project_id,
+                    tab_id,
+                    vec![PathBuf::from(r"C:\work\docs\checked.txt")],
+                )
+                .unwrap();
+
+            store.save_workspace(&workspace).unwrap();
+            store.save_window_width(1280).unwrap();
+            store.save_window_height(760).unwrap();
+            store.save_project_sort_mode("custom").unwrap();
+            store.save_project_custom_order(&[project_id.value()]).unwrap();
+            store.save_sidebar_collapsed(true).unwrap();
+            store.save_notes_custom_height(Some(325)).unwrap();
+            store.save_notes_maximized(false).unwrap();
+            (project_id, tab_id)
+        };
+
+        {
+            let reopened = SqliteWorkspaceStore::open(&database_path).unwrap();
+            let workspace = reopened.load_workspace().unwrap();
+            let session = workspace.restore_last_session().unwrap();
+            assert_eq!(session.project.id, project_id);
+            assert_eq!(session.active_tab.unwrap().id, tab_id);
+            assert_eq!(
+                session.selected_path,
+                Some(PathBuf::from(r"C:\work\docs\selected.txt"))
+            );
+            let tab = workspace.tabs_for_project(project_id).unwrap()[0];
+            assert_eq!(
+                tab.folder().unwrap().checked_paths,
+                vec![PathBuf::from(r"C:\work\docs\checked.txt")]
+            );
+            assert_eq!(reopened.load_window_width().unwrap(), Some(1280));
+            assert_eq!(reopened.load_window_height().unwrap(), Some(760));
+            assert_eq!(reopened.load_project_sort_mode().unwrap(), "custom");
+            assert_eq!(
+                reopened.load_project_custom_order().unwrap(),
+                vec![project_id.value()]
+            );
+            assert!(reopened.load_sidebar_collapsed().unwrap());
+            assert_eq!(reopened.load_notes_custom_height().unwrap(), Some(325));
+            assert!(!reopened.load_notes_maximized().unwrap());
+        }
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }
