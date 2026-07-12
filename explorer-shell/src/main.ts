@@ -71,15 +71,11 @@ import {
   projectMenuPosition,
 } from "./projectMenu";
 import {
-  DEFAULT_NOTE_PANEL_HEIGHT,
-  clampNotePanelHeight,
-  expandedNotePanelHeight,
   activeNoteForProject,
   notePanelView,
   notesForProject,
-  toggleNotePanelMaximized,
-  type NotePanelState,
 } from "./notePanel";
+import { NotePanelController } from "./notePanelController";
 import {
   noteContextSelection,
   noteDeleteMenuLabel,
@@ -242,8 +238,6 @@ let projectPointerState: ProjectPointerState = initialProjectPointerState();
 let draggedProjectIds: number[] = [];
 let suppressProjectClick = false;
 let sidebarCollapsed = false;
-let notePanelState: NotePanelState = { customHeight: null, maximized: false };
-let notePanelResize: { pointerId: number; startY: number; startHeight: number } | null = null;
 let projectSelection: MultiSelectionState = emptyMultiSelection();
 let noteSelection: MultiSelectionState = emptyMultiSelection();
 let tabSelection: MultiSelectionState = emptyMultiSelection();
@@ -364,6 +358,30 @@ const closeRuntimeDialog = element<HTMLDialogElement>("#close-runtime-dialog");
 const closeRuntimeDialogTitle = element<HTMLElement>("#close-runtime-dialog-title");
 const closeRuntimeDialogDetail = element<HTMLElement>("#close-runtime-dialog-detail");
 const confirmCloseRuntimeButton = element<HTMLButtonElement>("#confirm-close-runtime-button");
+
+const notePanelController = new NotePanelController({
+  load: async () => ({
+    customHeight: await invoke<number | null>("load_notes_custom_height"),
+    maximized: await invoke<boolean>("load_notes_maximized"),
+  }),
+  save: async (state) => {
+    await runCommand(async () => {
+      await invoke("save_notes_custom_height", { height: state.customHeight });
+      await invoke("save_notes_maximized", { maximized: state.maximized });
+    });
+  },
+  geometry: () => ({
+    viewportHeight: window.innerHeight,
+    panelTop: notesPanel.getBoundingClientRect().top,
+    panelHeight: notesPanel.getBoundingClientRect().height,
+  }),
+  setHeight: (height) => {
+    notesPanel.style.height = `${height}px`;
+  },
+  setResizing: (resizing) => {
+    notesPanel.classList.toggle("is-resizing", resizing);
+  },
+});
 
 window.addEventListener("DOMContentLoaded", async () => {
   document.body.append(addTabMenu);
@@ -633,11 +651,9 @@ async function loadSidebarCollapsed() {
 
 async function loadNotePanelState() {
   try {
-    const customHeight = await invoke<number | null>("load_notes_custom_height");
-    const maximized = await invoke<boolean>("load_notes_maximized");
-    notePanelState = { customHeight, maximized };
+    await notePanelController.load();
   } catch {
-    notePanelState = { customHeight: null, maximized: false };
+    notePanelController.replaceState({ customHeight: null, maximized: false });
   }
 }
 
@@ -670,77 +686,36 @@ async function toggleSidebar() {
 }
 
 async function toggleNotesSize() {
-  notePanelState = toggleNotePanelMaximized(notePanelState);
+  await notePanelController.toggleExpanded();
   render();
-  await runCommand(async () => {
-    await invoke("save_notes_maximized", { maximized: notePanelState.maximized });
-  });
-}
-
-function maximumNotePanelHeight() {
-  return Math.max(150, window.innerHeight - notesPanel.getBoundingClientRect().top - 16);
-}
-
-function expandedNotesHeight() {
-  return expandedNotePanelHeight(window.innerHeight, notesPanel.getBoundingClientRect().top);
-}
-
-function currentNormalNotePanelHeight() {
-  return notePanelState.customHeight ?? DEFAULT_NOTE_PANEL_HEIGHT;
 }
 
 function applyNotePanelHeight() {
-  const requested = notePanelState.maximized
-    ? expandedNotesHeight()
-    : currentNormalNotePanelHeight();
-  notesPanel.style.height = `${clampNotePanelHeight(requested, maximumNotePanelHeight())}px`;
+  notePanelController.applyHeight();
 }
 
 function startNotesResize(event: PointerEvent) {
   if (event.button !== 0) return;
   event.preventDefault();
-  notePanelResize = {
-    pointerId: event.pointerId,
-    startY: event.clientY,
-    startHeight: notesPanel.getBoundingClientRect().height,
-  };
-  notePanelState = { customHeight: notePanelResize.startHeight, maximized: false };
-  notesPanel.classList.add("is-resizing");
+  notePanelController.startResize(event.pointerId, event.clientY);
   notesResizeHandle.setPointerCapture(event.pointerId);
 }
 
 function moveNotesResize(event: PointerEvent) {
-  if (!notePanelResize || event.pointerId !== notePanelResize.pointerId) return;
-  const height = clampNotePanelHeight(
-    notePanelResize.startHeight + event.clientY - notePanelResize.startY,
-    maximumNotePanelHeight(),
-  );
-  notePanelState = { customHeight: Math.round(height), maximized: false };
-  applyNotePanelHeight();
+  notePanelController.moveResize(event.pointerId, event.clientY);
 }
 
 async function finishNotesResize(event: PointerEvent) {
-  if (!notePanelResize || event.pointerId !== notePanelResize.pointerId) return;
-  notePanelResize = null;
-  notesPanel.classList.remove("is-resizing");
+  if (!(await notePanelController.finishResize(event.pointerId))) return;
   if (notesResizeHandle.hasPointerCapture(event.pointerId)) {
     notesResizeHandle.releasePointerCapture(event.pointerId);
   }
-  await saveNotePanelState();
   renderNotes();
 }
 
 async function resetNotesHeight() {
-  notePanelState = { customHeight: null, maximized: false };
+  await notePanelController.reset();
   renderNotes();
-  await saveNotePanelState();
-}
-
-async function saveNotePanelState() {
-  await runCommand(async () => {
-    await invoke("save_notes_custom_height", { height: notePanelState.customHeight });
-    await invoke("save_notes_maximized", { maximized: notePanelState.maximized });
-  });
 }
 
 async function openStorageFolder() {
@@ -2679,13 +2654,13 @@ function renderNotes() {
   const project = activeProject();
   const projectNotes = project ? notesForProject(workspace.notes, project.id) : [];
   const note = activeNote();
-  const view = notePanelView(notePanelState);
+  const view = notePanelView(notePanelController.state);
 
   const resizing = notesPanel.classList.contains("is-resizing");
   notesPanel.className = `${view.className}${resizing ? " is-resizing" : ""}`;
   notesCount.textContent = `(${projectNotes.length})`;
   toggleNotesSizeButton.replaceChildren(
-    createLucideElement(notePanelState.maximized ? RestoreIcon : MaximizeIcon, {
+    createLucideElement(notePanelController.state.maximized ? RestoreIcon : MaximizeIcon, {
       width: 17,
       height: 17,
       "aria-hidden": "true",
