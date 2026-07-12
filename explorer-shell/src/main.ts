@@ -25,14 +25,13 @@ import { LinksRenderer } from "./linksRenderer";
 import { WorkspaceActivityRenderer } from "./workspaceActivityRenderer";
 import { WorkspaceApplicationController } from "./workspaceApplicationController";
 import { bootstrapWorkspaceApp } from "./bootstrap";
+import { ActiveHeaderRenderer } from "./activeHeaderRenderer";
 import {
   WorkspaceViewStateController,
 } from "./workspaceViewStateController";
 import { shouldRunAppUndo } from "./keyboard";
 import {
-  emptyTabFolderPrompt,
   finishInlineEdit,
-  shouldShowInlineEditPlaceholder,
   startInlineEdit,
   startTabFolderEditForChoice,
   type InlineEditField,
@@ -381,6 +380,16 @@ const activityRenderer = new WorkspaceActivityRenderer({
   openCheckedButton: openFilesButton,
   openSelectedButton,
 });
+const activeHeaderRenderer = new ActiveHeaderRenderer({
+  projectName: activeProjectName,
+  projectSummary: activeProjectSummary,
+  tabName: activeTabName,
+  tabKindLabel: activeTabKindLabel,
+  tabPath: activeTabPath,
+  openFolderButton,
+  addLinkButton,
+  addLinksButton,
+});
 const projectDragController = new ProjectDragController(projectList, {
   getState: () => ({
     sortMode: projectSortMode,
@@ -407,8 +416,6 @@ bootstrapWorkspaceApp({
     await createProject();
   });
 
-  activeProjectName.addEventListener("dblclick", () => startProjectInlineEdit("projectName"));
-  activeProjectSummary.addEventListener("dblclick", () => startProjectInlineEdit("projectSummary"));
   addNoteButton.addEventListener("click", addNote);
   deleteNoteButton.addEventListener("click", deleteActiveNote);
   toggleNotesSizeButton.addEventListener("click", toggleNotesSize);
@@ -1951,8 +1958,6 @@ function render() {
   sidebarToggleButton.textContent = sidebar.toggleLabel;
   sidebarToggleButton.title = sidebar.toggleTitle;
   sidebarToggleButton.setAttribute("aria-label", sidebar.toggleTitle);
-  renderInlineProjectField(activeProjectName, "projectName", project?.name ?? "None");
-  renderInlineProjectField(activeProjectSummary, "projectSummary", project?.summary || "");
   undoButton.disabled = !workspace.can_undo;
   undoButton.title = undoTooltip(workspace.undo_kind);
   undoHint.textContent = undoHintText(workspace.undo_kind);
@@ -1960,19 +1965,23 @@ function render() {
   addTabButton.disabled = !project;
   const isLinksTab = tab?.kind === "links";
   const activeLinks = linksForActiveTab();
-  activeTabKindLabel.textContent = isLinksTab ? "Links:" : "Folder:";
-  openFolderButton.hidden = isLinksTab;
-  addLinkButton.hidden = !isLinksTab;
-  addLinksButton.hidden = !isLinksTab;
-  openFolderButton.disabled = tab?.kind !== "folder" || !tab.folder_path;
-  renderActiveTabName(tab);
-  if (isLinksTab) {
-    activeTabPath.textContent = `${activeLinks.length} link${activeLinks.length === 1 ? "" : "s"}`;
-    activeTabPath.classList.remove("inline-editable-empty");
-    activeTabPath.title = "";
-  } else {
-    renderInlineTabFolder(activeTabPath, tab?.kind === "folder" ? tab.folder_path : "");
-  }
+  activeHeaderRenderer.render({
+    project,
+    tab,
+    linksCount: activeLinks.length,
+    inlineEdit: viewStateController.state.inlineEdit,
+    projectEditSurface: viewStateController.state.projectEditSurface,
+    tabNameEditSurface: viewStateController.state.tabNameEditSurface,
+  }, {
+    startProjectEdit: (field) => startProjectInlineEdit(field),
+    startTabNameEdit: (tabId) => startTabInlineEdit("tabName", tabId, "active-header"),
+    updateDraft: (value) => {
+      viewStateController.state.inlineEdit = { ...viewStateController.state.inlineEdit, draft: value };
+    },
+    commitProjectEdit: (value, cancel) => { void commitProjectInlineEdit(value, cancel); },
+    commitTabEdit: (value, cancel) => { void commitTabInlineEdit(value, cancel); },
+    chooseFolder: () => { void chooseActiveTabFolder(); },
+  });
   activityRenderer.render({
     tabKind: tab?.kind ?? null,
     checkedLinks: isLinksTab
@@ -2008,167 +2017,6 @@ function undoHintText(kind: WorkspaceDto["undo_kind"]) {
   return "";
 }
 
-
-function renderInlineProjectField(
-  container: HTMLElement,
-  field: InlineEditField,
-  value: string,
-) {
-  if (viewStateController.state.inlineEdit.field !== field || viewStateController.state.projectEditSurface !== "active-header") {
-    container.textContent = value;
-    container.classList.toggle(
-      "inline-editable-empty",
-      shouldShowInlineEditPlaceholder(value, false),
-    );
-    container.title = "Double-click to edit";
-    return;
-  }
-
-  container.title = "";
-  container.classList.toggle(
-    "inline-editable-empty",
-    shouldShowInlineEditPlaceholder(value, true),
-  );
-  const input = document.createElement("input");
-  input.className = "inline-editor";
-  input.dataset.inlineField = field;
-  input.value = viewStateController.state.inlineEdit.draft;
-  input.addEventListener("input", () => {
-    viewStateController.state.inlineEdit = {
-      ...viewStateController.state.inlineEdit,
-      draft: input.value,
-    };
-  });
-  input.addEventListener("keydown", async (event) => {
-    const keyboardEvent = event as KeyboardEvent;
-    if (keyboardEvent.key === "Enter") {
-      event.preventDefault();
-      await commitProjectInlineEdit(input.value);
-    } else if (keyboardEvent.key === "Escape") {
-      event.preventDefault();
-      await commitProjectInlineEdit(input.value, true);
-    }
-  });
-  input.addEventListener("blur", async () => {
-    if (viewStateController.state.inlineEdit.field === field) {
-      await commitProjectInlineEdit(input.value);
-    }
-  });
-
-  container.replaceChildren(input);
-}
-
-function renderActiveTabName(tab: TabDto | null) {
-  if (!tab) {
-    activeTabName.textContent = "None";
-    activeTabName.title = "";
-    activeTabName.classList.remove("editable-active-tab-name");
-    return;
-  }
-
-  activeTabName.classList.add("editable-active-tab-name");
-  if (
-    viewStateController.state.inlineEdit.field !== "tabName" ||
-    viewStateController.state.activeTabId !== tab.id ||
-    viewStateController.state.tabNameEditSurface !== "active-header"
-  ) {
-    activeTabName.textContent = tab.name;
-    activeTabName.title = "Double-click to edit the tab name";
-    activeTabName.ondblclick = () => startTabInlineEdit("tabName", tab.id, "active-header");
-    return;
-  }
-
-  activeTabName.title = "";
-  activeTabName.ondblclick = null;
-  const input = document.createElement("input");
-  input.className = "inline-editor active-tab-inline-editor";
-  input.dataset.inlineField = "tabName";
-  input.value = viewStateController.state.inlineEdit.draft;
-  input.addEventListener("input", () => {
-    viewStateController.state.inlineEdit = {
-      ...viewStateController.state.inlineEdit,
-      draft: input.value,
-    };
-  });
-  input.addEventListener("keydown", async (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      await commitTabInlineEdit(input.value);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      await commitTabInlineEdit(input.value, true);
-    }
-  });
-  input.addEventListener("blur", async () => {
-    if (viewStateController.state.inlineEdit.field === "tabName") {
-      await commitTabInlineEdit(input.value);
-    }
-  });
-  activeTabName.replaceChildren(input);
-}
-
-function renderInlineTabFolder(container: HTMLElement, value: string) {
-  if (viewStateController.state.inlineEdit.field !== "tabFolder") {
-    if (value.length === 0) {
-      const prompt = emptyTabFolderPrompt();
-      const state = document.createElement("span");
-      state.className = "empty-folder-state";
-      state.textContent = prompt.state;
-      const separator = document.createElement("span");
-      separator.className = "empty-folder-separator";
-      separator.textContent = " · ";
-      const action = document.createElement("span");
-      action.className = "empty-folder-action";
-      action.textContent = prompt.action;
-      container.replaceChildren(state, separator, action);
-    } else {
-      container.textContent = value;
-    }
-    container.classList.toggle("inline-editable-empty", value.length === 0);
-    container.title = "Double-click to edit the folder path";
-    return;
-  }
-
-  container.title = "";
-  const editor = document.createElement("span");
-  editor.className = "folder-inline-editor";
-
-  const input = document.createElement("input");
-  input.className = "inline-editor";
-  input.dataset.inlineField = "tabFolder";
-  input.value = viewStateController.state.inlineEdit.draft;
-  input.addEventListener("input", () => {
-    viewStateController.state.inlineEdit = {
-      ...viewStateController.state.inlineEdit,
-      draft: input.value,
-    };
-  });
-  input.addEventListener("keydown", async (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      await commitTabInlineEdit(input.value);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      await commitTabInlineEdit(input.value, true);
-    }
-  });
-  input.addEventListener("blur", async () => {
-    if (viewStateController.state.inlineEdit.field === "tabFolder") {
-      await commitTabInlineEdit(input.value);
-    }
-  });
-
-  const chooseButton = document.createElement("button");
-  chooseButton.type = "button";
-  chooseButton.textContent = "Choose";
-  chooseButton.addEventListener("mousedown", (event) => {
-    event.preventDefault();
-  });
-  chooseButton.addEventListener("click", chooseActiveTabFolder);
-
-  editor.append(input, chooseButton);
-  container.replaceChildren(editor);
-}
 
 function renderProjects() {
   sortCustomButton.classList.toggle("is-active", projectSortMode === "custom");
