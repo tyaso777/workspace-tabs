@@ -1174,4 +1174,115 @@ mod tests {
 
         std::fs::remove_dir_all(directory).unwrap();
     }
+
+    #[derive(Clone, Copy)]
+    enum DeleteScenario {
+        Project,
+        Tab,
+        Note,
+        Link,
+    }
+
+    fn assert_delete_undo_is_persisted_after_reopen(scenario: DeleteScenario, label: &str) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "workspace-tabs-delete-undo-{label}-{}-{unique}",
+            std::process::id()
+        ));
+        let database_path = directory.join("workspace.sqlite3");
+
+        let mut store = SqliteWorkspaceStore::open(&database_path).unwrap();
+        let mut workspace = Workspace::new();
+        let primary_project = workspace.create_project("Primary", "main project").unwrap();
+        let secondary_project = workspace
+            .create_project("Secondary", "deleted project")
+            .unwrap();
+        let folder_tab = workspace
+            .add_tab(primary_project, "Files", r"C:\work\files")
+            .unwrap();
+        let links_tab = workspace
+            .add_links_tab(primary_project, "References")
+            .unwrap();
+        let note_id = workspace
+            .add_note(primary_project, "Plan", "Keep this content")
+            .unwrap();
+        let link_id = workspace
+            .add_links(
+                primary_project,
+                links_tab,
+                vec![("Rust".to_string(), "https://www.rust-lang.org/".to_string())],
+            )
+            .unwrap()[0];
+        workspace
+            .add_tab(secondary_project, "Archive", r"C:\work\archive")
+            .unwrap();
+        let expected = workspace.snapshot();
+
+        let expected_undo_kind = match scenario {
+            DeleteScenario::Project => {
+                workspace.delete_project(secondary_project).unwrap();
+                explorer_core::UndoKind::DeleteProject
+            }
+            DeleteScenario::Tab => {
+                workspace.delete_tab(primary_project, folder_tab).unwrap();
+                explorer_core::UndoKind::DeleteTab
+            }
+            DeleteScenario::Note => {
+                workspace.delete_note(primary_project, note_id).unwrap();
+                explorer_core::UndoKind::DeleteNote
+            }
+            DeleteScenario::Link => {
+                workspace
+                    .delete_links(primary_project, links_tab, &[link_id])
+                    .unwrap();
+                explorer_core::UndoKind::DeleteLink
+            }
+        };
+        assert_eq!(workspace.undo_kind(), Some(expected_undo_kind));
+        store.save_workspace(&workspace).unwrap();
+
+        let deleted_state = SqliteWorkspaceStore::open(&database_path)
+            .unwrap()
+            .load_workspace()
+            .unwrap();
+        assert_ne!(deleted_state.snapshot(), expected);
+        assert!(!deleted_state.can_undo());
+
+        assert!(workspace.undo_last());
+        assert_eq!(workspace.snapshot(), expected);
+        store.save_workspace(&workspace).unwrap();
+        drop(store);
+
+        let restored = SqliteWorkspaceStore::open(&database_path)
+            .unwrap()
+            .load_workspace()
+            .unwrap();
+        assert_eq!(restored.snapshot(), expected);
+        assert!(!restored.can_undo());
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn project_delete_and_undo_are_persisted_after_database_reopen() {
+        assert_delete_undo_is_persisted_after_reopen(DeleteScenario::Project, "project");
+    }
+
+    #[test]
+    fn tab_delete_and_undo_are_persisted_after_database_reopen() {
+        assert_delete_undo_is_persisted_after_reopen(DeleteScenario::Tab, "tab");
+    }
+
+    #[test]
+    fn note_delete_and_undo_are_persisted_after_database_reopen() {
+        assert_delete_undo_is_persisted_after_reopen(DeleteScenario::Note, "note");
+    }
+
+    #[test]
+    fn link_delete_and_undo_are_persisted_after_database_reopen() {
+        assert_delete_undo_is_persisted_after_reopen(DeleteScenario::Link, "link");
+    }
 }
