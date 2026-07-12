@@ -97,6 +97,7 @@ test("creates, edits, switches, and reorders workspace tabs", async ({ page }) =
   await page.locator(".link-row .file-check").nth(1).click();
   await expect(page.locator(".link-row.is-checked")).toHaveCount(2);
   await page.locator(".link-row").first().click({ button: "right" });
+  await expect(page.locator("#open-link-menu-button")).toHaveText("Open 2 Links");
   await expect(page.locator("#delete-link-menu-button")).toHaveText("Delete 2 Links");
   await page.locator("#delete-link-menu-button").click();
   await expect(page.locator("#delete-link-dialog-title")).toHaveText("Delete 2 links?");
@@ -186,14 +187,20 @@ test("shows folder contents, previews files, and reacts to external changes", as
   await alpha.locator(".file-check").click();
   await beta.locator(".file-check").click();
   await expect(page.locator(".file-row.is-checked")).toHaveCount(2);
-  await expect(page.locator("#checked-paths")).toContainText("2 items checked");
+
+  await alpha.click({ button: "right" });
+  await expect(page.locator("#open-file-menu-button")).toHaveText("Open 2 Items");
+  await page.locator(".file-row.is-dir").click({ button: "right" });
+  await expect(page.locator("#open-file-menu-button")).toHaveText("Open");
+  await expect(page.locator(".file-row.is-checked")).toHaveCount(2);
 
   writeFileSync(gammaPath, "Gamma added outside WorkspaceTabs\n", "utf8");
   await expect(page.locator(".file-row").filter({ hasText: "gamma.txt" })).toBeVisible();
 
   await beta.click();
-  await expect(page.locator("#selected-path")).toContainText("beta.md");
+  await expect(beta).toHaveClass(/is-current/);
   rmSync(betaPath);
   await expect(beta).toHaveCount(0);
-  await expect(page.locator("#selected-path")).toHaveText("None");
+  await expect(page.locator(".file-row.is-current")).toHaveCount(0);
+  await expect(page.locator("#preview-content")).toHaveText("No preview");
 });

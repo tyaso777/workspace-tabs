@@ -2,9 +2,9 @@ import { projectMenuPosition } from "./projectMenu";
 
 type MenuRegistration = { menu: HTMLElement; focusTarget: HTMLElement };
 
-export class ContextMenuController<Key extends string> {
+export class ContextMenuController<Key extends string, Target = number> {
   readonly #registrations: Record<Key, MenuRegistration>;
-  readonly #targets = new Map<Key, number>();
+  readonly #targets = new Map<Key, Target>();
 
   constructor(registrations: Record<Key, MenuRegistration>) {
     this.#registrations = registrations;
@@ -12,7 +12,7 @@ export class ContextMenuController<Key extends string> {
 
   open(
     key: Key,
-    targetId: number,
+    targetId: Target,
     pointerX: number,
     pointerY: number,
     options: { alignRight?: boolean } = {},
@@ -46,7 +46,7 @@ export class ContextMenuController<Key extends string> {
     (Object.keys(this.#registrations) as Key[]).forEach((key) => this.close(key));
   }
 
-  target(key: Key): number | null {
+  target(key: Key): Target | null {
     return this.#targets.get(key) ?? null;
   }
 

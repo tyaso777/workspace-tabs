@@ -30,6 +30,7 @@ function actions(): FolderListRenderActions {
     toggleChecked: vi.fn(),
     checkRange: vi.fn(),
     open: vi.fn(),
+    openContextMenu: vi.fn(),
     select: vi.fn(),
   };
 }
@@ -91,5 +92,22 @@ describe("FolderListRenderer DOM", () => {
     );
     expect(handler.hideTooltip).toHaveBeenCalledOnce();
     expect(handler.select).toHaveBeenCalledWith(entries[0]);
+  });
+
+  it("routes a row context menu without changing checked state", () => {
+    const list = document.createElement("div");
+    const handler = actions();
+    new FolderListRenderer(list).render(state(), handler);
+    const file = list.querySelectorAll<HTMLElement>(".file-row")[1];
+
+    file.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true,
+      clientX: 24,
+      clientY: 36,
+    }));
+
+    expect(handler.openContextMenu).toHaveBeenCalledWith(entries[1], 24, 36);
+    expect(handler.toggleChecked).not.toHaveBeenCalled();
+    expect(handler.select).not.toHaveBeenCalled();
   });
 });

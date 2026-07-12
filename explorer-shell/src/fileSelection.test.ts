@@ -11,9 +11,20 @@ import {
   selectSingleFileEntry,
   shouldShowSelectionCheckbox,
   toggleCheckedFileEntry,
+  fileContextOpenPaths,
 } from "./fileSelection";
 
 describe("file selection", () => {
+  it("opens all checked paths only when the context row is checked", () => {
+    expect(fileContextOpenPaths("C:\\work\\b.txt", [
+      "C:\\work\\a.txt",
+      "C:\\work\\b.txt",
+    ])).toEqual(["C:\\work\\a.txt", "C:\\work\\b.txt"]);
+    expect(fileContextOpenPaths("C:\\work\\other.txt", [
+      "C:\\work\\a.txt",
+      "C:\\work\\b.txt",
+    ])).toEqual(["C:\\work\\other.txt"]);
+  });
   it("selects one file without changing checked files", () => {
     const state = selectSingleFileEntry(
       { ...initialFileSelectionState(), selectedPaths: ["C:\\work\\checked.txt"] },

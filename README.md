@@ -30,6 +30,7 @@ DesktopとLocal Webを同じSQLiteに対して同時起動することはでき�
 - Ctrl+クリックで個別チェック、Shift+クリックでActiveからの連続範囲を一括チェック／解除
 - Fileの自動Preview、選択項目またはチェック項目のOpen
 - File／Folder行のOpenボタン
+- Checked行の右クリックからChecked全件を一括Open。未Checked行ではその1件だけを対象にし、既存Checkedは維持
 - Windowsのファイル変更通知による一覧の自動更新
 - 選択項目、チェック項目、最近開いたFileをSQLiteへ保存
 
@@ -41,6 +42,7 @@ DesktopとLocal Webを同じSQLiteに対して同時起動することはでき�
 - 表示名とURLのダブルクリック編集、右クリック編集
 - Ctrl／Shiftクリックとチェックボックスによる複数チェック
 - チェックしたURLの一括Open／Delete
+- Checked URLの右クリックメニューはChecked全件をOpen対象にする
 - 選択、チェック、表示順をSQLiteへ保存
 - 登録可能なURLは`http://`と`https://`
 

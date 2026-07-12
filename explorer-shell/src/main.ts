@@ -1,5 +1,6 @@
 import {
   checkFileRange,
+  fileContextOpenPaths,
   fileOpenAction,
   initialFileSelectionState,
   previewTargetPath,
@@ -273,8 +274,6 @@ const addLinksTabButton = element<HTMLButtonElement>("#add-links-tab-button");
 const openFolderButton = element<HTMLButtonElement>("#open-folder-button");
 const addLinkButton = element<HTMLButtonElement>("#add-link-button");
 const addLinksButton = element<HTMLButtonElement>("#add-links-button");
-const openFilesButton = element<HTMLButtonElement>("#open-files-button");
-const openSelectedButton = element<HTMLButtonElement>("#open-selected-button");
 const activeTabName = element<HTMLElement>("#active-tab-name");
 const activeTabKindLabel = element<HTMLElement>("#active-tab-kind-label");
 const activeTabPath = element<HTMLElement>("#active-tab-path");
@@ -302,8 +301,8 @@ const deleteLinkDialogTitle = element<HTMLElement>("#delete-link-dialog-title");
 const deleteLinkDialogDetail = element<HTMLElement>("#delete-link-dialog-detail");
 const confirmDeleteLinkButton = element<HTMLButtonElement>("#confirm-delete-link-button");
 const fileTooltip = element<HTMLElement>("#file-tooltip");
-const checkedPaths = element<HTMLElement>("#checked-paths");
-const selectedPath = element<HTMLElement>("#selected-path");
+const fileContextMenu = element<HTMLElement>("#file-context-menu");
+const openFileMenuButton = element<HTMLButtonElement>("#open-file-menu-button");
 const previewContent = element<HTMLElement>("#preview-content");
 const recentList = element<HTMLElement>("#recent-list");
 const projectContextMenu = element<HTMLElement>("#project-context-menu");
@@ -345,6 +344,9 @@ const contextMenus = new ContextMenuController({
   note: { menu: noteContextMenu, focusTarget: editNoteTitleMenuButton },
   link: { menu: linkContextMenu, focusTarget: editLinkNameMenuButton },
 });
+const fileContextMenus = new ContextMenuController<"file", string>({
+  file: { menu: fileContextMenu, focusTarget: openFileMenuButton },
+});
 
 const notePanelController = new NotePanelController({
   load: async () => ({
@@ -385,12 +387,8 @@ const tabBarRenderer = new TabBarRenderer(tabList);
 const folderListRenderer = new FolderListRenderer(fileList);
 const linksRenderer = new LinksRenderer(fileList);
 const activityRenderer = new WorkspaceActivityRenderer({
-  checked: checkedPaths,
-  selected: selectedPath,
   preview: previewContent,
   recent: recentList,
-  openCheckedButton: openFilesButton,
-  openSelectedButton,
 });
 const activeHeaderRenderer = new ActiveHeaderRenderer({
   projectName: activeProjectName,
@@ -456,6 +454,7 @@ function registerWorkspaceEvents() {
   editLinkNameMenuButton.addEventListener("click", () => editLinkFromMenu("name"));
   editLinkUrlMenuButton.addEventListener("click", () => editLinkFromMenu("url"));
   openLinkMenuButton.addEventListener("click", openLinkFromMenu);
+  openFileMenuButton.addEventListener("click", openFilesFromMenu);
   copyLinkMenuButton.addEventListener("click", copyLinkFromMenu);
   deleteLinkMenuButton.addEventListener("click", deleteLinkFromMenu);
   confirmDeleteLinkButton.addEventListener("click", confirmLinkDelete);
@@ -465,11 +464,13 @@ function registerWorkspaceEvents() {
     const target = event.target as HTMLElement;
     if (
       contextMenus.contains(target) ||
+      fileContextMenus.contains(target) ||
       addTabMenu.contains(target) ||
       target === addTabButton ||
       target.closest(".project-item-menu-button")
     ) return;
     contextMenus.closeAll();
+    fileContextMenus.closeAll();
     closeAddTabMenu();
   });
   document.addEventListener("keydown", (event) => {
@@ -488,10 +489,12 @@ function registerWorkspaceEvents() {
     }
     if (event.key !== "Escape") return;
     contextMenus.closeAll();
+    fileContextMenus.closeAll();
     closeAddTabMenu();
   });
   window.addEventListener("blur", () => {
     contextMenus.closeAll();
+    fileContextMenus.closeAll();
     closeAddTabMenu();
   });
 
@@ -507,8 +510,6 @@ function registerWorkspaceEvents() {
   addLinksButton.addEventListener("click", showAddLinksDialog);
   confirmAddLinkButton.addEventListener("click", confirmAddLink);
   confirmAddLinksButton.addEventListener("click", confirmAddLinks);
-  openFilesButton.addEventListener("click", openCheckedFiles);
-  openSelectedButton.addEventListener("click", openSelectedPath);
   openStorageFolderButton.addEventListener("click", openStorageFolder);
   sortCustomButton.addEventListener("click", () => setProjectSortMode("custom"));
   sortCreatedButton.addEventListener("click", () => setProjectSortMode("created"));
@@ -1373,19 +1374,41 @@ async function checkEntryRange(entry: FileEntryDto) {
 }
 
 async function openEntry(entry: FileEntryDto) {
+  await openFolderPaths([entry.path]);
+}
+
+function openFileContextMenu(entry: FileEntryDto, pointerX: number, pointerY: number) {
+  contextMenus.closeAll();
+  const paths = fileContextOpenPaths(
+    entry.path,
+    viewStateController.state.fileSelection.selectedPaths,
+  );
+  openFileMenuButton.textContent = paths.length === 1 ? "Open" : `Open ${paths.length} Items`;
+  fileContextMenus.open("file", entry.path, pointerX, pointerY);
+}
+
+async function openFilesFromMenu() {
+  const clickedPath = fileContextMenus.target("file");
+  fileContextMenus.close("file");
+  if (clickedPath === null) return;
+  await openFolderPaths(fileContextOpenPaths(
+    clickedPath,
+    viewStateController.state.fileSelection.selectedPaths,
+  ));
+}
+
+async function openFolderPaths(paths: string[]) {
   const project = activeProject();
-  if (!project) return;
-  if (fileOpenAction({ path: entry.path, isDir: entry.is_dir }) === "openFolderExternally") {
-    await runCommand(async () => {
-      await invoke("open_folder", { folderPath: entry.path });
-    });
-    return;
-  }
+  if (!project || paths.length === 0) return;
   await runCommand(async () => {
-    await applicationController.invoke("open_file", {
-      projectId: project.id,
-      path: entry.path,
-    });
+    for (const path of paths) {
+      const entry = files.find((candidate) => candidate.path === path);
+      if (entry && fileOpenAction({ path, isDir: entry.is_dir }) === "openFolderExternally") {
+        await invoke("open_folder", { folderPath: path });
+      } else {
+        await applicationController.invoke("open_file", { projectId: project.id, path });
+      }
+    }
     render();
   });
 }
@@ -1524,9 +1547,7 @@ function showSelectedLinkImmediately(tab: LinksTabDto, link: LinkDto) {
   fileList.querySelectorAll<HTMLElement>(".link-row").forEach((row) => {
     row.classList.toggle("is-current", Number(row.dataset.linkId) === link.id);
   });
-  selectedPath.textContent = view.selectedUrl;
   previewContent.textContent = view.preview;
-  openSelectedButton.disabled = false;
 }
 
 function scheduleLinkSelection(link: LinkDto) {
@@ -1617,10 +1638,12 @@ async function commitLinkEdit(link: LinkDto, field: "name" | "url", value: strin
 
 function openLinkContextMenu(link: LinkDto, pointerX: number, pointerY: number) {
   const tab = activeTab();
-  const deleteCount = tab?.kind === "links"
+  const targetCount = tab?.kind === "links"
     ? linkIdsForDelete(link.id, tab.checked_link_ids).length
     : 1;
-  deleteLinkMenuButton.textContent = deleteCount === 1 ? "Delete Link" : `Delete ${deleteCount} Links`;
+  openLinkMenuButton.textContent = targetCount === 1 ? "Open" : `Open ${targetCount} Links`;
+  deleteLinkMenuButton.textContent = targetCount === 1 ? "Delete Link" : `Delete ${targetCount} Links`;
+  fileContextMenus.closeAll();
   contextMenus.open("link", link.id, pointerX, pointerY);
 }
 
@@ -1641,8 +1664,14 @@ function editLinkFromMenu(field: "name" | "url") {
 
 async function openLinkFromMenu() {
   const link = linkFromMenu();
+  const tab = activeTab();
+  const linkIds = link && tab?.kind === "links"
+    ? linkIdsForDelete(link.id, tab.checked_link_ids)
+    : [];
   closeLinkContextMenu();
-  if (link) await openLink(link);
+  for (const candidate of linksForActiveTab().filter((item) => linkIds.includes(item.id))) {
+    await openLink(candidate);
+  }
 }
 
 async function copyLinkFromMenu() {
@@ -1757,66 +1786,6 @@ function openNoteContextMenu(noteId: number, pointerX: number, pointerY: number)
 
 function closeNoteContextMenu() {
   contextMenus.close("note");
-}
-
-async function openCheckedFiles() {
-  const project = activeProject();
-  const tab = activeTab();
-  if (!project || !tab) return;
-  if (tab.kind === "links") {
-    for (const link of linksForActiveTab().filter((candidate) =>
-      tab.checked_link_ids.includes(candidate.id),
-    )) {
-      await openLink(link);
-    }
-    return;
-  }
-  const paths = viewStateController.state.fileSelection.selectedPaths;
-  if (paths.length === 0) {
-    previewText = "Check one or more files first.";
-    render();
-    return;
-  }
-
-  await runCommand(async () => {
-    for (const path of paths) {
-      const entry = files.find((candidate) => candidate.path === path);
-      if (entry?.is_dir) {
-        await invoke("open_folder", { folderPath: path });
-      } else {
-        await applicationController.invoke("open_file", {
-          projectId: project.id,
-          path,
-        });
-      }
-    }
-    render();
-  });
-}
-
-async function openSelectedPath() {
-  const project = activeProject();
-  const tab = activeTab();
-  if (tab?.kind === "links") {
-    const link = linksForActiveTab().find((candidate) => candidate.id === tab.selected_link_id);
-    if (link) await openLink(link);
-    return;
-  }
-  const path = viewStateController.state.fileSelection.selectedPath;
-  if (!project || path === null) return;
-  const selectedEntry = files.find((entry) => entry.path === path);
-
-  await runCommand(async () => {
-    if (selectedEntry?.is_dir) {
-      await invoke("open_folder", { folderPath: path });
-      return;
-    }
-    await applicationController.invoke("open_file", {
-      projectId: project.id,
-      path,
-    });
-    render();
-  });
 }
 
 async function openRecentFile(path: string) {
@@ -1974,7 +1943,6 @@ function render() {
   undoHint.textContent = undoHintText(workspace.undo_kind);
   deleteProjectButton.disabled = !project;
   addTabButton.disabled = !project;
-  const isLinksTab = tab?.kind === "links";
   const activeLinks = linksForActiveTab();
   activeHeaderRenderer.render({
     project,
@@ -1994,14 +1962,6 @@ function render() {
     chooseFolder: () => { void chooseActiveTabFolder(); },
   });
   activityRenderer.render({
-    tabKind: tab?.kind ?? null,
-    checkedLinks: isLinksTab
-      ? activeLinks.filter((link) => tab.checked_link_ids.includes(link.id))
-      : [],
-    selectedLink: isLinksTab
-      ? activeLinks.find((link) => link.id === tab.selected_link_id) ?? null
-      : null,
-    fileSelection: viewStateController.state.fileSelection,
     previewText,
     recentFiles: workspace.recent_files,
   }, (path) => { void openRecentFile(path); });
@@ -2185,6 +2145,7 @@ function renderFiles() {
       toggleChecked: (entry) => { void toggleCheckedEntry(entry); },
       checkRange: (entry) => { void checkEntryRange(entry); },
       open: (entry) => { void openEntry(entry); },
+      openContextMenu: openFileContextMenu,
       select: (entry) => { void selectEntry(entry); },
     },
   );

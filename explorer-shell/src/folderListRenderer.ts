@@ -31,6 +31,7 @@ export type FolderListRenderActions = {
   toggleChecked: (entry: FolderListEntry) => void;
   checkRange: (entry: FolderListEntry) => void;
   open: (entry: FolderListEntry) => void;
+  openContextMenu: (entry: FolderListEntry, x: number, y: number) => void;
   select: (entry: FolderListEntry) => void;
 };
 
@@ -119,6 +120,10 @@ export class FolderListRenderer {
       if (event.shiftKey) actions.checkRange(entry);
       else if (event.ctrlKey || event.metaKey) actions.toggleChecked(entry);
       else actions.select(entry);
+    });
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      actions.openContextMenu(entry, event.clientX, event.clientY);
     });
     row.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;

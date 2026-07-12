@@ -121,21 +121,6 @@
 
           <aside class="activity-pane">
             <section>
-              <div class="activity-section-header">
-                <h3>Checked</h3>
-                <button id="open-files-button" type="button">Open Files</button>
-              </div>
-              <div id="checked-paths" class="path-text">None</div>
-            </section>
-            <hr class="activity-separator" />
-            <section>
-              <div class="activity-section-header">
-                <h3>Selected</h3>
-                <button id="open-selected-button" type="button">Open</button>
-              </div>
-              <div id="selected-path" class="path-text">None</div>
-            </section>
-            <section>
               <h3>Preview</h3>
               <pre id="preview-content" class="preview-content">No preview</pre>
             </section>
@@ -148,6 +133,9 @@
       </section>
     </main>
     <div id="file-tooltip" class="file-tooltip" role="tooltip"></div>
+    <div id="file-context-menu" class="project-context-menu" role="menu" hidden>
+      <button id="open-file-menu-button" type="button" role="menuitem">Open</button>
+    </div>
     <div
       id="local-web-disconnected"
       class="local-web-disconnected"

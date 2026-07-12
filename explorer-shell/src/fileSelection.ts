@@ -76,6 +76,10 @@ export function fileOpenAction(entry: FileSelectionEntry) {
   return entry.isDir ? "openFolderExternally" : "openFile";
 }
 
+export function fileContextOpenPaths(clickedPath: string, checkedPaths: string[]): string[] {
+  return checkedPaths.includes(clickedPath) ? [...checkedPaths] : [clickedPath];
+}
+
 export function fileRowTooltip(entry: FileSelectionEntry) {
   return entry.isDir
     ? "Select this folder or use Open"

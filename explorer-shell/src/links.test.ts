@@ -67,7 +67,7 @@ describe("links tab", () => {
     expect(linkClickAction(false, false)).toEqual({ select: true, toggleChecked: false });
   });
 
-  it("deletes all checked links when the context link is checked", () => {
+  it("targets all checked links when the context link is checked", () => {
     expect(linkIdsForDelete(2, [1, 2, 3])).toEqual([1, 2, 3]);
     expect(linkIdsForDelete(4, [1, 2, 3])).toEqual([4]);
   });

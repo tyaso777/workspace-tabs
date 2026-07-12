@@ -34,7 +34,8 @@ Tauri Desktop版とLocal Web版で共有するVanilla TypeScript UIです。実�
 - Folder Pathをダブルクリックし、直接入力または`Choose`で変更
 - 行クリックでActive選択、チェックボックスまたはCtrl／Shiftクリックで複数チェック
 - `Open`でFile／Folderを開く
-- `Open Checked`でチェック項目をまとめて開く
+- Checked行の右クリック`Open N Items`でチェック項目をまとめて開く
+- 未Checked行の右クリック`Open`はその1件だけを対象とし、既存Checkedは維持
 - Fileを選択するとPreviewを自動表示
 
 ## Links Tab
@@ -43,7 +44,7 @@ Tauri Desktop版とLocal Web版で共有するVanilla TypeScript UIです。実�
 - `Add Links`: URLを1行ずつ一括追加
 - 行クリックで選択、チェックボックスまたはCtrl／Shiftクリックで複数チェック
 - `Open`／`Copy`、ダブルクリック編集、右クリックメニュー
-- `Open Links`でチェックしたURLをまとめて開く
+- Checked URLの右クリック`Open N Links`でまとめて開く
 
 ## 開発
 
