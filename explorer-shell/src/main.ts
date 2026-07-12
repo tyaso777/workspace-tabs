@@ -224,6 +224,11 @@ const applicationController = new WorkspaceApplicationController<WorkspaceDto>({
     errorMessage = message;
     render();
   },
+}, {
+  projects: projectsApi,
+  tabs: tabsApi,
+  notes: notesApi,
+  invokeWorkspace: (command, args) => invoke<WorkspaceDto>(command, args),
 });
 
 const appShell = element<HTMLElement>("#app-shell");
@@ -667,7 +672,7 @@ async function loadNotePanelState() {
 
 async function loadWorkspace() {
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("workspace_snapshot");
+    await applicationController.invoke("workspace_snapshot");
     projectCustomOrder = projectCustomOrder.length === 0
       ? sortProjectsForDisplay(workspace.projects, projectSortMode).map((project) => project.id)
       : normalizeProjectCustomOrder(
@@ -736,7 +741,7 @@ async function setProjectSortMode(mode: ProjectSortMode) {
   projectSortMode = mode;
   render();
   await runCommand(async () => {
-    await projectsApi.saveSortMode(mode);
+    await applicationController.saveProjectSortMode(mode);
   });
 }
 
@@ -750,7 +755,7 @@ async function createProject() {
   }
 
   await runCommand(async () => {
-    workspace = await projectsApi.create(name, summary);
+    await applicationController.createProject(name, summary);
     const project = workspace.projects[workspace.projects.length - 1];
     projectCustomOrder = normalizeProjectCustomOrder(
       projectCustomOrder,
@@ -800,7 +805,7 @@ function startProjectInlineEdit(
 }
 
 async function persistProjectCustomOrder() {
-  await projectsApi.saveCustomOrder(projectCustomOrder);
+  await applicationController.saveProjectCustomOrder(projectCustomOrder);
 }
 
 async function commitProjectInlineEdit(value: string, cancel = false) {
@@ -828,7 +833,7 @@ async function commitProjectInlineEdit(value: string, cancel = false) {
   }
 
   await runCommand(async () => {
-    workspace = await projectsApi.update(
+    await applicationController.updateProject(
       project.id,
       result.field === "projectName" ? result.value : project.name,
       result.field === "projectSummary" ? result.value : project.summary,
@@ -908,7 +913,7 @@ async function confirmProjectDelete() {
   dialogs.close("deleteProject");
 
   await runCommand(async () => {
-    workspace = await projectsApi.deleteMany(projectIds);
+    await applicationController.deleteProjects(projectIds);
     viewStateController.state.activeProjectId = workspace.restored_session?.project.id ?? workspace.projects[0]?.id ?? null;
     viewStateController.state.activeTabId = workspace.restored_session?.active_tab?.id ?? activeProject()?.active_tab_id ?? null;
     viewStateController.state.projectSelection = emptyMultiSelection();
@@ -925,7 +930,7 @@ async function addNote() {
   if (!project) return;
 
   await runCommand(async () => {
-    workspace = await notesApi.add(project.id, "New Note", "");
+    await applicationController.addNote(project.id, "New Note", "");
     const note = activeNote();
     if (!note) return;
     viewStateController.state.noteSelection = { selectedIds: [note.id], anchorId: note.id };
@@ -967,7 +972,7 @@ async function commitNoteInlineEdit(value: string, cancel = false) {
   }
 
   await runCommand(async () => {
-    workspace = await notesApi.update(
+    await applicationController.updateNote(
       project.id,
       note.id,
       result.field === "noteTitle" ? result.value : note.title,
@@ -984,7 +989,7 @@ async function activateNote(noteId: number) {
   if (!(await finishCurrentInlineEdit())) return;
 
   await runCommand(async () => {
-    workspace = await notesApi.activate(project.id, noteId);
+    await applicationController.activateNote(project.id, noteId);
     render();
   });
 }
@@ -1053,7 +1058,7 @@ async function deleteNotes(noteIds: number[]) {
   if (!window.confirm(confirmation)) return;
 
   await runCommand(async () => {
-    workspace = await notesApi.deleteMany(
+    await applicationController.deleteNotes(
       project.id,
       notes.map((candidate) => candidate.id),
     );
@@ -1067,7 +1072,7 @@ async function undoLast() {
   if (!workspace.can_undo) return;
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("undo_last");
+    await applicationController.invoke("undo_last");
     const restoredProjectId = workspace.restored_session?.project.id ?? workspace.projects[0]?.id ?? null;
     const restoredTabId = workspace.restored_session?.active_tab?.id ??
       workspace.projects.find((project) => project.id === restoredProjectId)?.active_tab_id ?? null;
@@ -1117,17 +1122,18 @@ async function addTab(kind: "folder" | "links") {
 
   await runCommand(async () => {
     const name = kind === "folder" ? DEFAULT_TAB_NAME : "New Links";
-    workspace =
-      kind === "folder"
-        ? await tabsApi.addFolder(project.id, name, "")
-        : await tabsApi.addLinks(project.id, name);
+    if (kind === "folder") {
+      await applicationController.addFolderTab(project.id, name, "");
+    } else {
+      await applicationController.addLinksTab(project.id, name);
+    }
     const projectTabs = tabsForProject(project.id);
     viewStateController.state.activeTabId = projectTabs[projectTabs.length - 1]?.id ?? null;
     viewStateController.state.tabSelection = viewStateController.state.activeTabId === null
       ? emptyMultiSelection()
       : { selectedIds: [viewStateController.state.activeTabId], anchorId: viewStateController.state.activeTabId };
     if (viewStateController.state.activeTabId !== null) {
-      workspace = await tabsApi.activate(project.id, viewStateController.state.activeTabId);
+      await applicationController.activateTab(project.id, viewStateController.state.activeTabId);
     }
     previewText = "No preview";
     viewStateController.state.inlineEdit = startInlineEdit("tabName", name);
@@ -1173,7 +1179,7 @@ async function activateTab(tabId: number) {
   if (!project) return;
 
   await runCommand(async () => {
-    workspace = await tabsApi.activate(project.id, tabId);
+    await applicationController.activateTab(project.id, tabId);
     viewStateController.activateTab(tabId);
     syncFileSelectionFromActiveTab();
     previewText = "No preview";
@@ -1224,15 +1230,16 @@ async function commitTabInlineEdit(value: string, cancel = false) {
 
   await runCommand(async () => {
     viewStateController.state.editingLink = null;
-    workspace =
-      result.field === "tabName"
-        ? await tabsApi.rename(project.id, tab.id, result.value)
-        : await tabsApi.updateFolder(
-            project.id,
-            tab.id,
-            tabNameAfterFolderChange(tab.name, result.value),
-            result.value,
-          );
+    if (result.field === "tabName") {
+      await applicationController.renameTab(project.id, tab.id, result.value);
+    } else {
+      await applicationController.updateFolderTab(
+        project.id,
+        tab.id,
+        tabNameAfterFolderChange(tab.name, result.value),
+        result.value,
+      );
+    }
     resetInlineEdit();
     viewStateController.state.tabNameEditSurface = "tab-bar";
     previewText = "No preview";
@@ -1272,7 +1279,7 @@ async function deleteTabs(tabIds: number[]) {
   if (!project || tabIds.length === 0) return;
 
   await runCommand(async () => {
-    workspace = await tabsApi.deleteMany(project.id, tabIds);
+    await applicationController.deleteTabs(project.id, tabIds);
     if (viewStateController.state.activeTabId !== null && tabIds.includes(viewStateController.state.activeTabId)) {
       viewStateController.state.activeTabId = activeProject()?.active_tab_id ?? tabsForProject(project.id)[0]?.id ?? null;
     }
@@ -1291,7 +1298,7 @@ async function moveTabs(tabIds: number[], targetIndex: number, draggedTabId: num
   if (!project) return;
 
   await runCommand(async () => {
-    workspace = await tabsApi.moveMany(project.id, tabIds, targetIndex);
+    await applicationController.moveTabs(project.id, tabIds, targetIndex);
     viewStateController.state.activeTabId = draggedTabId;
     resetInlineEdit();
     syncFileSelectionFromActiveTab();
@@ -1309,7 +1316,7 @@ async function selectEntry(entry: FileEntryDto) {
       path: entry.path,
       isDir: entry.is_dir,
     });
-    workspace = await invoke<WorkspaceDto>("select_path", {
+    await applicationController.invoke("select_path", {
       projectId: project.id,
       tabId: tab.id,
       path: entry.path,
@@ -1330,7 +1337,7 @@ async function persistCheckedEntries(nextState: FileSelectionState) {
   if (!project || tab?.kind !== "folder") return;
   viewStateController.state.fileSelection = nextState;
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("update_checked_paths", {
+    await applicationController.invoke("update_checked_paths", {
       projectId: project.id,
       tabId: tab.id,
       paths: viewStateController.state.fileSelection.selectedPaths,
@@ -1366,7 +1373,7 @@ async function openEntry(entry: FileEntryDto) {
     return;
   }
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("open_file", {
+    await applicationController.invoke("open_file", {
       projectId: project.id,
       path: entry.path,
     });
@@ -1475,7 +1482,7 @@ async function addLinksToActiveTab(links: LinkInput[], dialog: "addLink" | "addL
   const tab = activeTab();
   if (!project || tab?.kind !== "links") return;
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("add_links", {
+    await applicationController.invoke("add_links", {
       projectId: project.id,
       tabId: tab.id,
       links,
@@ -1492,7 +1499,7 @@ function selectLink(link: LinkDto) {
   showSelectedLinkImmediately(tab, link);
 
   linkSelectionQueue = linkSelectionQueue.then(() => runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("select_link", {
+    await applicationController.invoke("select_link", {
       projectId: project.id,
       tabId: tab.id,
       linkId: link.id,
@@ -1524,12 +1531,12 @@ async function toggleCheckedLinkEntry(link: LinkDto) {
   const linkIds = toggleCheckedLink(tab.checked_link_ids, link.id);
   showSelectedLinkImmediately(tab, link);
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("update_checked_links", {
+    await applicationController.invoke("update_checked_links", {
       projectId: project.id,
       tabId: tab.id,
       linkIds,
     });
-    workspace = await invoke<WorkspaceDto>("select_link", {
+    await applicationController.invoke("select_link", {
       projectId: project.id,
       tabId: tab.id,
       linkId: link.id,
@@ -1583,7 +1590,7 @@ async function commitLinkEdit(link: LinkDto, field: "name" | "url", value: strin
   if (!project || tab?.kind !== "links") return;
   viewStateController.state.editingLink = null;
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("update_link", {
+    await applicationController.invoke("update_link", {
       projectId: project.id,
       tabId: tab.id,
       linkId: link.id,
@@ -1666,7 +1673,7 @@ async function deleteLinks(linkIds: number[]) {
   const tab = activeTab();
   if (!project || tab?.kind !== "links" || linkIds.length === 0) return;
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("delete_links", {
+    await applicationController.invoke("delete_links", {
       projectId: project.id,
       tabId: tab.id,
       linkIds,
@@ -1682,7 +1689,7 @@ async function moveLink(linkId: number, targetIndex: number) {
   const tab = activeTab();
   if (!project || tab?.kind !== "links") return;
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("move_link", {
+    await applicationController.invoke("move_link", {
       projectId: project.id,
       tabId: tab.id,
       linkId,
@@ -1768,7 +1775,7 @@ async function openCheckedFiles() {
       if (entry?.is_dir) {
         await invoke("open_folder", { folderPath: path });
       } else {
-        workspace = await invoke<WorkspaceDto>("open_file", {
+        await applicationController.invoke("open_file", {
           projectId: project.id,
           path,
         });
@@ -1795,7 +1802,7 @@ async function openSelectedPath() {
       await invoke("open_folder", { folderPath: path });
       return;
     }
-    workspace = await invoke<WorkspaceDto>("open_file", {
+    await applicationController.invoke("open_file", {
       projectId: project.id,
       path,
     });
@@ -1808,7 +1815,7 @@ async function openRecentFile(path: string) {
   if (!project) return;
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("open_file", {
+    await applicationController.invoke("open_file", {
       projectId: project.id,
       path,
     });
@@ -1929,14 +1936,14 @@ async function pruneMissingSelectionsForActiveTab(entries: FileEntryDto[]) {
 
   if (prunedSelectedPath !== tab.selected_path) {
     previewText = "No preview";
-    workspace = await invoke<WorkspaceDto>("clear_selected_path", {
+    await applicationController.invoke("clear_selected_path", {
       projectId: project.id,
       tabId: tab.id,
     });
   }
 
   if (prunedCheckedPaths.length !== tab.checked_paths.length) {
-    workspace = await invoke<WorkspaceDto>("update_checked_paths", {
+    await applicationController.invoke("update_checked_paths", {
       projectId: project.id,
       tabId: tab.id,
       paths: prunedCheckedPaths,
