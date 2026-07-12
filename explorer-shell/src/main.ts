@@ -22,6 +22,7 @@ import {
   type LinkInput,
 } from "./links";
 import { LinksRenderer } from "./linksRenderer";
+import { WorkspaceActivityRenderer } from "./workspaceActivityRenderer";
 import {
   WorkspaceViewStateController,
 } from "./workspaceViewStateController";
@@ -361,6 +362,14 @@ const notePanelRenderer = new NotePanelRenderer({
 const tabBarRenderer = new TabBarRenderer(tabList);
 const folderListRenderer = new FolderListRenderer(fileList);
 const linksRenderer = new LinksRenderer(fileList);
+const activityRenderer = new WorkspaceActivityRenderer({
+  checked: checkedPaths,
+  selected: selectedPath,
+  preview: previewContent,
+  recent: recentList,
+  openCheckedButton: openFilesButton,
+  openSelectedButton,
+});
 const projectDragController = new ProjectDragController(projectList, {
   getState: () => ({
     sortMode: projectSortMode,
@@ -1947,13 +1956,6 @@ function render() {
   addLinkButton.hidden = !isLinksTab;
   addLinksButton.hidden = !isLinksTab;
   openFolderButton.disabled = tab?.kind !== "folder" || !tab.folder_path;
-  openFilesButton.textContent = isLinksTab ? "Open Links" : "Open Checked";
-  openFilesButton.disabled = isLinksTab
-    ? (tab?.checked_link_ids.length ?? 0) === 0
-    : viewStateController.state.fileSelection.selectedPaths.length === 0;
-  openSelectedButton.disabled = isLinksTab
-    ? tab?.selected_link_id === null
-    : viewStateController.state.fileSelection.selectedPath === null;
   renderActiveTabName(tab);
   if (isLinksTab) {
     activeTabPath.textContent = `${activeLinks.length} link${activeLinks.length === 1 ? "" : "s"}`;
@@ -1962,15 +1964,23 @@ function render() {
   } else {
     renderInlineTabFolder(activeTabPath, tab?.kind === "folder" ? tab.folder_path : "");
   }
-  renderCheckedPaths();
-  renderSelectedPath();
-  previewContent.textContent = previewText;
+  activityRenderer.render({
+    tabKind: tab?.kind ?? null,
+    checkedLinks: isLinksTab
+      ? activeLinks.filter((link) => tab.checked_link_ids.includes(link.id))
+      : [],
+    selectedLink: isLinksTab
+      ? activeLinks.find((link) => link.id === tab.selected_link_id) ?? null
+      : null,
+    fileSelection: viewStateController.state.fileSelection,
+    previewText,
+    recentFiles: workspace.recent_files,
+  }, (path) => { void openRecentFile(path); });
 
   renderProjects();
   renderNotes();
   renderTabs();
   renderFiles();
-  renderRecent();
 }
 
 function undoTooltip(kind: WorkspaceDto["undo_kind"]) {
@@ -1989,57 +1999,6 @@ function undoHintText(kind: WorkspaceDto["undo_kind"]) {
   return "";
 }
 
-function renderCheckedPaths() {
-  const tab = activeTab();
-  if (tab?.kind === "links") {
-    const links = linksForActiveTab().filter((link) => tab.checked_link_ids.includes(link.id));
-    if (links.length === 0) {
-      checkedPaths.textContent = "None";
-      return;
-    }
-    const summary = document.createElement("strong");
-    summary.textContent = `${links.length} link${links.length === 1 ? "" : "s"} checked`;
-    const list = document.createElement("ul");
-    list.className = "path-list";
-    for (const link of links) {
-      const item = document.createElement("li");
-      item.textContent = link.name;
-      list.append(item);
-    }
-    checkedPaths.replaceChildren(summary, list);
-    return;
-  }
-  if (viewStateController.state.fileSelection.selectedPaths.length === 0) {
-    checkedPaths.textContent = "None";
-    return;
-  }
-
-  if (viewStateController.state.fileSelection.selectedPaths.length === 1) {
-    checkedPaths.textContent = viewStateController.state.fileSelection.selectedPaths[0];
-    return;
-  }
-
-  const summary = document.createElement("strong");
-  summary.textContent = `${viewStateController.state.fileSelection.selectedPaths.length} items checked`;
-  const list = document.createElement("ul");
-  list.className = "path-list";
-  for (const path of viewStateController.state.fileSelection.selectedPaths) {
-    const item = document.createElement("li");
-    item.textContent = path;
-    list.append(item);
-  }
-  checkedPaths.replaceChildren(summary, list);
-}
-
-function renderSelectedPath() {
-  const tab = activeTab();
-  if (tab?.kind === "links") {
-    selectedPath.textContent =
-      linksForActiveTab().find((link) => link.id === tab.selected_link_id)?.url ?? "None";
-    return;
-  }
-  selectedPath.textContent = viewStateController.state.fileSelection.selectedPath ?? "None";
-}
 
 function renderInlineProjectField(
   container: HTMLElement,
@@ -2416,28 +2375,6 @@ function hideFileTooltip() {
     fileTooltipTimer = null;
   }
   fileTooltip.classList.remove("is-visible");
-}
-
-function renderRecent() {
-  if (workspace.recent_files.length === 0) {
-    recentList.innerHTML = `<p class="notice">None yet.</p>`;
-    return;
-  }
-
-  recentList.replaceChildren(
-    ...workspace.recent_files.map((file) => {
-      const item = document.createElement("div");
-      item.className = "recent-item";
-      const path = document.createElement("span");
-      path.textContent = file.path;
-      const openButton = document.createElement("button");
-      openButton.type = "button";
-      openButton.textContent = "Open";
-      openButton.addEventListener("click", () => openRecentFile(file.path));
-      item.append(path, openButton);
-      return item;
-    }),
-  );
 }
 
 function resetTabSelectionToActive() {
