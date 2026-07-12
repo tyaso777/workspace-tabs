@@ -21,6 +21,16 @@ export type WorkspaceViewState = WorkspaceEditingState & {
 };
 
 export class WorkspaceViewStateController {
+  state: WorkspaceViewState = {
+    activeProjectId: null,
+    activeTabId: null,
+    projectSelection: emptyMultiSelection(),
+    noteSelection: emptyMultiSelection(),
+    tabSelection: emptyMultiSelection(),
+    fileSelection: initialFileSelectionState(),
+    ...this.emptyEditingState(),
+  };
+
   emptyEditingState(): WorkspaceEditingState {
     return {
       inlineEdit: emptyInlineEditState(),
@@ -32,41 +42,33 @@ export class WorkspaceViewStateController {
     };
   }
 
-  activateProject(
-    state: WorkspaceViewState,
-    projectId: number,
-    activeTabId: number | null,
-  ): WorkspaceViewState {
-    const projectChanged = state.activeProjectId !== projectId;
-    return {
-      ...state,
+  activateProject(projectId: number, activeTabId: number | null): void {
+    const projectChanged = this.state.activeProjectId !== projectId;
+    this.state = {
+      ...this.state,
       ...this.emptyEditingState(),
       activeProjectId: projectId,
       activeTabId,
-      noteSelection: projectChanged ? emptyMultiSelection() : state.noteSelection,
+      noteSelection: projectChanged ? emptyMultiSelection() : this.state.noteSelection,
       tabSelection: projectChanged
         ? this.selectionForActive(activeTabId)
-        : state.tabSelection,
+        : this.state.tabSelection,
       fileSelection: initialFileSelectionState(),
     };
   }
 
-  activateTab(state: WorkspaceViewState, tabId: number): WorkspaceViewState {
-    return {
-      ...state,
+  activateTab(tabId: number): void {
+    this.state = {
+      ...this.state,
       ...this.emptyEditingState(),
       activeTabId: tabId,
       fileSelection: initialFileSelectionState(),
     };
   }
 
-  restoreAfterUndo(
-    state: WorkspaceViewState,
-    activeProjectId: number | null,
-    activeTabId: number | null,
-  ): WorkspaceViewState {
-    return {
-      ...state,
+  restoreAfterUndo(activeProjectId: number | null, activeTabId: number | null): void {
+    this.state = {
+      ...this.state,
       ...this.emptyEditingState(),
       activeProjectId,
       activeTabId,
@@ -81,5 +83,9 @@ export class WorkspaceViewStateController {
     return activeId === null
       ? emptyMultiSelection()
       : { selectedIds: [activeId], anchorId: activeId };
+  }
+
+  resetEditing(): void {
+    this.state = { ...this.state, ...this.emptyEditingState() };
   }
 }

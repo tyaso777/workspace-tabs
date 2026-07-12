@@ -19,10 +19,11 @@ function populatedState(): WorkspaceViewState {
 }
 
 describe("WorkspaceViewStateController", () => {
-  const controller = new WorkspaceViewStateController();
-
   it("resets project-scoped selection and editing when the project changes", () => {
-    const next = controller.activateProject(populatedState(), 2, 20);
+    const controller = new WorkspaceViewStateController();
+    controller.state = populatedState();
+    controller.activateProject(2, 20);
+    const next = controller.state;
     expect(next.activeProjectId).toBe(2);
     expect(next.activeTabId).toBe(20);
     expect(next.noteSelection).toEqual({ selectedIds: [], anchorId: null });
@@ -34,13 +35,19 @@ describe("WorkspaceViewStateController", () => {
 
   it("preserves note and tab multi-selection when reactivating the same project", () => {
     const state = populatedState();
-    const next = controller.activateProject(state, 1, 10);
+    const controller = new WorkspaceViewStateController();
+    controller.state = state;
+    controller.activateProject(1, 10);
+    const next = controller.state;
     expect(next.noteSelection).toEqual(state.noteSelection);
     expect(next.tabSelection).toEqual(state.tabSelection);
   });
 
   it("activates one tab and clears editing and file selection", () => {
-    const next = controller.activateTab(populatedState(), 11);
+    const controller = new WorkspaceViewStateController();
+    controller.state = populatedState();
+    controller.activateTab(11);
+    const next = controller.state;
     expect(next.activeTabId).toBe(11);
     expect(next.tabSelection).toEqual({ selectedIds: [10, 11], anchorId: 10 });
     expect(next.fileSelection).toEqual({ selectedPath: null, selectedPaths: [] });
@@ -48,7 +55,10 @@ describe("WorkspaceViewStateController", () => {
   });
 
   it("clears transient selections after undo while restoring active ids", () => {
-    const next = controller.restoreAfterUndo(populatedState(), 3, 30);
+    const controller = new WorkspaceViewStateController();
+    controller.state = populatedState();
+    controller.restoreAfterUndo(3, 30);
+    const next = controller.state;
     expect(next.activeProjectId).toBe(3);
     expect(next.activeTabId).toBe(30);
     expect(next.projectSelection.selectedIds).toEqual([]);

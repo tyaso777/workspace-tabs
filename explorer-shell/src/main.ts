@@ -24,18 +24,15 @@ import {
 import { LinksRenderer } from "./linksRenderer";
 import {
   WorkspaceViewStateController,
-  type WorkspaceViewState,
 } from "./workspaceViewStateController";
 import { shouldRunAppUndo } from "./keyboard";
 import {
   emptyTabFolderPrompt,
-  emptyInlineEditState,
   finishInlineEdit,
   shouldShowInlineEditPlaceholder,
   startInlineEdit,
   startTabFolderEditForChoice,
   type InlineEditField,
-  type InlineEditState,
 } from "./inlineEdit";
 import {
   shouldRefreshForFolderChange,
@@ -72,7 +69,6 @@ import { createProjectsApi } from "./projectsApi";
 import {
   applyMultiSelection,
   emptyMultiSelection,
-  type MultiSelectionState,
 } from "./multiSelection";
 import { sidebarView } from "./sidebar";
 import {
@@ -189,6 +185,7 @@ type StorageInfoDto = {
 const notesApi = createNotesApi<WorkspaceDto>(invoke);
 const tabsApi = createTabsApi<WorkspaceDto>(invoke);
 const projectsApi = createProjectsApi<WorkspaceDto>(invoke);
+const viewStateController = new WorkspaceViewStateController();
 
 let workspace: WorkspaceDto = {
   projects: [],
@@ -201,29 +198,17 @@ let workspace: WorkspaceDto = {
   undo_kind: null,
 };
 
-let activeProjectId: number | null = null;
-let activeTabId: number | null = null;
 let files: FileEntryDto[] = [];
 let errorMessage: string | null = null;
 let previewText = "No preview";
-let inlineEditState: InlineEditState = emptyInlineEditState();
-let editingProjectId: number | null = null;
-let editingNoteId: number | null = null;
-let projectEditSurface: "active-header" | "project-list" = "active-header";
-let tabNameEditSurface: "tab-bar" | "active-header" = "tab-bar";
-let fileSelectionState: FileSelectionState = initialFileSelectionState();
 let projectSortMode: ProjectSortMode = "custom";
 let projectCustomOrder: number[] = [];
 let suppressProjectClick = false;
 let projectInteractionRevision = 0;
 let sidebarCollapsed = false;
-let projectSelection: MultiSelectionState = emptyMultiSelection();
-let noteSelection: MultiSelectionState = emptyMultiSelection();
-let tabSelection: MultiSelectionState = emptyMultiSelection();
 let noteInteractionQueue: Promise<void> = Promise.resolve();
 let folderRefreshTimer: number | null = null;
 let fileTooltipTimer: number | null = null;
-let editingLink: { id: number; field: "name" | "url" } | null = null;
 let copiedLinkId: number | null = null;
 let linkSelectionQueue: Promise<void> = Promise.resolve();
 let pendingDeleteProjectIds: number[] = [];
@@ -376,12 +361,11 @@ const notePanelRenderer = new NotePanelRenderer({
 const tabBarRenderer = new TabBarRenderer(tabList);
 const folderListRenderer = new FolderListRenderer(fileList);
 const linksRenderer = new LinksRenderer(fileList);
-const viewStateController = new WorkspaceViewStateController();
 const projectDragController = new ProjectDragController(projectList, {
   getState: () => ({
     sortMode: projectSortMode,
-    inlineEditing: inlineEditState.field !== null,
-    selection: projectSelection,
+    inlineEditing: viewStateController.state.inlineEdit.field !== null,
+    selection: viewStateController.state.projectSelection,
     projectIds: workspace.projects.map((project) => project.id),
     customOrder: projectCustomOrder,
   }),
@@ -663,10 +647,10 @@ async function loadWorkspace() {
           workspace.projects.map((project) => project.id),
         );
     const restored = workspace.restored_session;
-    activeProjectId = restored?.project.id ?? workspace.projects[0]?.id ?? null;
-    activeTabId = restored?.active_tab?.id ?? activeProject()?.active_tab_id ?? null;
-    projectSelection = emptyMultiSelection();
-    noteSelection = emptyMultiSelection();
+    viewStateController.state.activeProjectId = restored?.project.id ?? workspace.projects[0]?.id ?? null;
+    viewStateController.state.activeTabId = restored?.active_tab?.id ?? activeProject()?.active_tab_id ?? null;
+    viewStateController.state.projectSelection = emptyMultiSelection();
+    viewStateController.state.noteSelection = emptyMultiSelection();
     resetTabSelectionToActive();
     syncFileSelectionFromActiveTab();
     await loadFilesForActiveTab();
@@ -744,13 +728,13 @@ async function createProject() {
       projectCustomOrder,
       workspace.projects.map((candidate) => candidate.id),
     );
-    activeProjectId = project.id;
-    activeTabId = project.active_tab_id;
-    projectSelection = { selectedIds: [project.id], anchorId: project.id };
-    noteSelection = emptyMultiSelection();
+    viewStateController.state.activeProjectId = project.id;
+    viewStateController.state.activeTabId = project.active_tab_id;
+    viewStateController.state.projectSelection = { selectedIds: [project.id], anchorId: project.id };
+    viewStateController.state.noteSelection = emptyMultiSelection();
     resetTabSelectionToActive();
     files = [];
-    fileSelectionState = initialFileSelectionState();
+    viewStateController.state.fileSelection = initialFileSelectionState();
     previewText = "No preview";
     projectNameInput.value = "";
     projectSummaryInput.value = "";
@@ -761,23 +745,23 @@ async function createProject() {
 
 function startProjectInlineEdit(
   field: InlineEditField,
-  projectId = activeProjectId,
+  projectId = viewStateController.state.activeProjectId,
   surface: "active-header" | "project-list" = "active-header",
 ) {
   projectInteractionRevision += 1;
   const project =
     projectId === null ? null : workspace.projects.find((candidate) => candidate.id === projectId);
   if (!project) return;
-  activeProjectId = project.id;
-  activeTabId = project.active_tab_id ?? tabsForProject(project.id)[0]?.id ?? null;
+  viewStateController.state.activeProjectId = project.id;
+  viewStateController.state.activeTabId = project.active_tab_id ?? tabsForProject(project.id)[0]?.id ?? null;
   resetTabSelectionToActive();
-  editingProjectId = project.id;
-  projectEditSurface = surface;
+  viewStateController.state.editingProjectId = project.id;
+  viewStateController.state.projectEditSurface = surface;
   if (surface === "project-list") {
     suppressProjectClick = true;
     window.setTimeout(() => { suppressProjectClick = false; }, 250);
   }
-  inlineEditState = startInlineEdit(field, projectInlineValue(project, field));
+  viewStateController.state.inlineEdit = startInlineEdit(field, projectInlineValue(project, field));
   syncFileSelectionFromActiveTab();
   render();
   if (surface === "project-list") {
@@ -793,13 +777,13 @@ async function persistProjectCustomOrder() {
 
 async function commitProjectInlineEdit(value: string, cancel = false) {
   const project =
-    editingProjectId === null
+    viewStateController.state.editingProjectId === null
       ? activeProject()
-      : workspace.projects.find((candidate) => candidate.id === editingProjectId);
+      : workspace.projects.find((candidate) => candidate.id === viewStateController.state.editingProjectId);
   if (!project) return;
-  const result = finishInlineEdit(inlineEditState, value, {
+  const result = finishInlineEdit(viewStateController.state.inlineEdit, value, {
     cancel,
-    required: inlineEditState.field === "projectName",
+    required: viewStateController.state.inlineEdit.field === "projectName",
   });
 
   if (result.type === "cancel") {
@@ -811,7 +795,7 @@ async function commitProjectInlineEdit(value: string, cancel = false) {
   if (result.type === "invalid") {
     errorMessage = "Project name is required.";
     render();
-    focusInlineEditor(inlineEditState.field);
+    focusInlineEditor(viewStateController.state.inlineEdit.field);
     return;
   }
 
@@ -856,45 +840,7 @@ function focusProjectListEditor(projectId: number, field: InlineEditField) {
 }
 
 function resetInlineEdit() {
-  const editing = viewStateController.emptyEditingState();
-  inlineEditState = editing.inlineEdit;
-  editingProjectId = editing.editingProjectId;
-  editingNoteId = editing.editingNoteId;
-  projectEditSurface = editing.projectEditSurface;
-  tabNameEditSurface = editing.tabNameEditSurface;
-  editingLink = editing.editingLink;
-}
-
-function currentViewState(): WorkspaceViewState {
-  return {
-    activeProjectId,
-    activeTabId,
-    projectSelection,
-    noteSelection,
-    tabSelection,
-    fileSelection: fileSelectionState,
-    inlineEdit: inlineEditState,
-    editingProjectId,
-    editingNoteId,
-    projectEditSurface,
-    tabNameEditSurface,
-    editingLink,
-  };
-}
-
-function applyViewState(state: WorkspaceViewState) {
-  activeProjectId = state.activeProjectId;
-  activeTabId = state.activeTabId;
-  projectSelection = state.projectSelection;
-  noteSelection = state.noteSelection;
-  tabSelection = state.tabSelection;
-  fileSelectionState = state.fileSelection;
-  inlineEditState = state.inlineEdit;
-  editingProjectId = state.editingProjectId;
-  editingNoteId = state.editingNoteId;
-  projectEditSurface = state.projectEditSurface;
-  tabNameEditSurface = state.tabNameEditSurface;
-  editingLink = state.editingLink;
+  viewStateController.resetEditing();
 }
 
 function requestActiveProjectDelete() {
@@ -911,8 +857,8 @@ function requestProjectDeleteFromMenu() {
 }
 
 function projectIdsForDelete(fallbackProjectId: number) {
-  return projectSelection.selectedIds.includes(fallbackProjectId)
-    ? [...projectSelection.selectedIds]
+  return viewStateController.state.projectSelection.selectedIds.includes(fallbackProjectId)
+    ? [...viewStateController.state.projectSelection.selectedIds]
     : [fallbackProjectId];
 }
 
@@ -939,10 +885,10 @@ async function confirmProjectDelete() {
 
   await runCommand(async () => {
     workspace = await projectsApi.deleteMany(projectIds);
-    activeProjectId = workspace.restored_session?.project.id ?? workspace.projects[0]?.id ?? null;
-    activeTabId = workspace.restored_session?.active_tab?.id ?? activeProject()?.active_tab_id ?? null;
-    projectSelection = emptyMultiSelection();
-    noteSelection = emptyMultiSelection();
+    viewStateController.state.activeProjectId = workspace.restored_session?.project.id ?? workspace.projects[0]?.id ?? null;
+    viewStateController.state.activeTabId = workspace.restored_session?.active_tab?.id ?? activeProject()?.active_tab_id ?? null;
+    viewStateController.state.projectSelection = emptyMultiSelection();
+    viewStateController.state.noteSelection = emptyMultiSelection();
     resetTabSelectionToActive();
     resetInlineEdit();
     previewText = "No preview";
@@ -958,9 +904,9 @@ async function addNote() {
     workspace = await notesApi.add(project.id, "New Note", "");
     const note = activeNote();
     if (!note) return;
-    noteSelection = { selectedIds: [note.id], anchorId: note.id };
-    editingNoteId = note.id;
-    inlineEditState = startInlineEdit("noteTitle", note.title);
+    viewStateController.state.noteSelection = { selectedIds: [note.id], anchorId: note.id };
+    viewStateController.state.editingNoteId = note.id;
+    viewStateController.state.inlineEdit = startInlineEdit("noteTitle", note.title);
     render();
     focusInlineEditor("noteTitle");
   });
@@ -969,19 +915,19 @@ async function addNote() {
 function startNoteInlineEdit(field: "noteTitle" | "noteContent") {
   const note = activeNote();
   if (!note) return;
-  editingNoteId = note.id;
-  inlineEditState = startInlineEdit(field, field === "noteTitle" ? note.title : note.content);
+  viewStateController.state.editingNoteId = note.id;
+  viewStateController.state.inlineEdit = startInlineEdit(field, field === "noteTitle" ? note.title : note.content);
   render();
   focusInlineEditor(field);
 }
 
 async function commitNoteInlineEdit(value: string, cancel = false) {
   const project = activeProject();
-  const note = workspace.notes.find((candidate) => candidate.id === editingNoteId);
+  const note = workspace.notes.find((candidate) => candidate.id === viewStateController.state.editingNoteId);
   if (!project || !note) return;
-  const result = finishInlineEdit(inlineEditState, value, {
+  const result = finishInlineEdit(viewStateController.state.inlineEdit, value, {
     cancel,
-    required: inlineEditState.field === "noteTitle",
+    required: viewStateController.state.inlineEdit.field === "noteTitle",
   });
 
   if (result.type === "cancel") {
@@ -1026,7 +972,7 @@ async function selectNoteFromPointer(
   const project = activeProject();
   if (!project) return;
   const orderedIds = notesForProject(workspace.notes, project.id).map((note) => note.id);
-  noteSelection = applyMultiSelection(noteSelection, orderedIds, noteId, {
+  viewStateController.state.noteSelection = applyMultiSelection(viewStateController.state.noteSelection, orderedIds, noteId, {
     ctrlKey: event.ctrlKey || event.metaKey,
     shiftKey: event.shiftKey,
   });
@@ -1051,8 +997,8 @@ async function startNoteTitleEditFromList(noteId: number) {
 
 async function prepareNoteContextMenu(noteId: number, pointerX: number, pointerY: number) {
   if (!(await finishCurrentInlineEdit())) return;
-  const selectedIds = noteContextSelection(noteSelection.selectedIds, noteId);
-  noteSelection = { selectedIds, anchorId: noteId };
+  const selectedIds = noteContextSelection(viewStateController.state.noteSelection.selectedIds, noteId);
+  viewStateController.state.noteSelection = { selectedIds, anchorId: noteId };
   await activateNote(noteId);
   if (activeNote()?.id !== noteId) return;
   render();
@@ -1062,7 +1008,7 @@ async function prepareNoteContextMenu(noteId: number, pointerX: number, pointerY
 async function deleteActiveNote() {
   const note = activeNote();
   if (!note) return;
-  const noteIds = noteSelection.selectedIds.length > 0 ? [...noteSelection.selectedIds] : [note.id];
+  const noteIds = viewStateController.state.noteSelection.selectedIds.length > 0 ? [...viewStateController.state.noteSelection.selectedIds] : [note.id];
   await deleteNotes(noteIds);
 }
 
@@ -1087,7 +1033,7 @@ async function deleteNotes(noteIds: number[]) {
       project.id,
       notes.map((candidate) => candidate.id),
     );
-    noteSelection = emptyMultiSelection();
+    viewStateController.state.noteSelection = emptyMultiSelection();
     resetInlineEdit();
     render();
   });
@@ -1101,11 +1047,7 @@ async function undoLast() {
     const restoredProjectId = workspace.restored_session?.project.id ?? workspace.projects[0]?.id ?? null;
     const restoredTabId = workspace.restored_session?.active_tab?.id ??
       workspace.projects.find((project) => project.id === restoredProjectId)?.active_tab_id ?? null;
-    applyViewState(viewStateController.restoreAfterUndo(
-      currentViewState(),
-      restoredProjectId,
-      restoredTabId,
-    ));
+    viewStateController.restoreAfterUndo(restoredProjectId, restoredTabId);
     syncFileSelectionFromActiveTab();
     previewText = "No preview";
     await loadFilesForActiveTab();
@@ -1156,16 +1098,16 @@ async function addTab(kind: "folder" | "links") {
         ? await tabsApi.addFolder(project.id, name, "")
         : await tabsApi.addLinks(project.id, name);
     const projectTabs = tabsForProject(project.id);
-    activeTabId = projectTabs[projectTabs.length - 1]?.id ?? null;
-    tabSelection = activeTabId === null
+    viewStateController.state.activeTabId = projectTabs[projectTabs.length - 1]?.id ?? null;
+    viewStateController.state.tabSelection = viewStateController.state.activeTabId === null
       ? emptyMultiSelection()
-      : { selectedIds: [activeTabId], anchorId: activeTabId };
-    if (activeTabId !== null) {
-      workspace = await tabsApi.activate(project.id, activeTabId);
+      : { selectedIds: [viewStateController.state.activeTabId], anchorId: viewStateController.state.activeTabId };
+    if (viewStateController.state.activeTabId !== null) {
+      workspace = await tabsApi.activate(project.id, viewStateController.state.activeTabId);
     }
     previewText = "No preview";
-    inlineEditState = startInlineEdit("tabName", name);
-    tabNameEditSurface = "tab-bar";
+    viewStateController.state.inlineEdit = startInlineEdit("tabName", name);
+    viewStateController.state.tabNameEditSurface = "tab-bar";
     await loadFilesForActiveTab();
     focusInlineEditor("tabName");
   });
@@ -1174,7 +1116,7 @@ async function addTab(kind: "folder" | "links") {
 async function activateProject(projectId: number, shouldRender = true) {
   const nextTabId = workspace.projects.find((project) => project.id === projectId)?.active_tab_id ??
     tabsForProject(projectId)[0]?.id ?? null;
-  applyViewState(viewStateController.activateProject(currentViewState(), projectId, nextTabId));
+  viewStateController.activateProject(projectId, nextTabId);
   syncFileSelectionFromActiveTab();
   previewText = "No preview";
   await loadFilesForActiveTab(false);
@@ -1185,18 +1127,18 @@ async function selectProjectFromPointer(projectId: number, event: MouseEvent) {
   const orderedIds = sortProjectsForDisplay(workspace.projects, projectSortMode).map(
     (project) => project.id,
   );
-  const nextSelection = applyMultiSelection(projectSelection, orderedIds, projectId, {
+  const nextSelection = applyMultiSelection(viewStateController.state.projectSelection, orderedIds, projectId, {
     ctrlKey: event.ctrlKey || event.metaKey,
     shiftKey: event.shiftKey,
   });
   const selectionUnchanged =
-    nextSelection.anchorId === projectSelection.anchorId &&
-    nextSelection.selectedIds.length === projectSelection.selectedIds.length &&
-    nextSelection.selectedIds.every((id, index) => id === projectSelection.selectedIds[index]);
-  if (activeProjectId === projectId && selectionUnchanged) return;
+    nextSelection.anchorId === viewStateController.state.projectSelection.anchorId &&
+    nextSelection.selectedIds.length === viewStateController.state.projectSelection.selectedIds.length &&
+    nextSelection.selectedIds.every((id, index) => id === viewStateController.state.projectSelection.selectedIds[index]);
+  if (viewStateController.state.activeProjectId === projectId && selectionUnchanged) return;
 
   const revision = ++projectInteractionRevision;
-  projectSelection = nextSelection;
+  viewStateController.state.projectSelection = nextSelection;
   await activateProject(projectId, false);
   if (revision !== projectInteractionRevision) return;
   render();
@@ -1208,7 +1150,7 @@ async function activateTab(tabId: number) {
 
   await runCommand(async () => {
     workspace = await tabsApi.activate(project.id, tabId);
-    applyViewState(viewStateController.activateTab(currentViewState(), tabId));
+    viewStateController.activateTab(tabId);
     syncFileSelectionFromActiveTab();
     previewText = "No preview";
     await loadFilesForActiveTab();
@@ -1217,14 +1159,14 @@ async function activateTab(tabId: number) {
 
 function startTabInlineEdit(
   field: InlineEditField,
-  tabId = activeTabId,
+  tabId = viewStateController.state.activeTabId,
   surface: "tab-bar" | "active-header" = "tab-bar",
 ) {
   const tab = tabId === null ? null : workspace.tabs.find((candidate) => candidate.id === tabId);
   if (!tab) return;
-  activeTabId = tab.id;
-  tabNameEditSurface = surface;
-  inlineEditState = startInlineEdit(field, tabInlineValue(tab, field));
+  viewStateController.state.activeTabId = tab.id;
+  viewStateController.state.tabNameEditSurface = surface;
+  viewStateController.state.inlineEdit = startInlineEdit(field, tabInlineValue(tab, field));
   render();
   if (field === "tabName" && surface === "active-header") {
     focusActiveTabNameEditor();
@@ -1237,14 +1179,14 @@ async function commitTabInlineEdit(value: string, cancel = false) {
   const project = activeProject();
   const tab = activeTab();
   if (!project || !tab) return;
-  const result = finishInlineEdit(inlineEditState, value, {
+  const result = finishInlineEdit(viewStateController.state.inlineEdit, value, {
     cancel,
-    required: inlineEditState.field === "tabName",
+    required: viewStateController.state.inlineEdit.field === "tabName",
   });
 
   if (result.type === "cancel") {
     resetInlineEdit();
-    tabNameEditSurface = "tab-bar";
+    viewStateController.state.tabNameEditSurface = "tab-bar";
     render();
     return;
   }
@@ -1252,12 +1194,12 @@ async function commitTabInlineEdit(value: string, cancel = false) {
   if (result.type === "invalid") {
     errorMessage = "Tab name is required.";
     render();
-    focusInlineEditor(inlineEditState.field);
+    focusInlineEditor(viewStateController.state.inlineEdit.field);
     return;
   }
 
   await runCommand(async () => {
-    editingLink = null;
+    viewStateController.state.editingLink = null;
     workspace =
       result.field === "tabName"
         ? await tabsApi.rename(project.id, tab.id, result.value)
@@ -1268,7 +1210,7 @@ async function commitTabInlineEdit(value: string, cancel = false) {
             result.value,
           );
     resetInlineEdit();
-    tabNameEditSurface = "tab-bar";
+    viewStateController.state.tabNameEditSurface = "tab-bar";
     previewText = "No preview";
     syncFileSelectionFromActiveTab();
     await loadFilesForActiveTab();
@@ -1276,29 +1218,29 @@ async function commitTabInlineEdit(value: string, cancel = false) {
 }
 
 async function finishCurrentInlineEdit() {
-  if (inlineEditState.field === null) return true;
+  if (viewStateController.state.inlineEdit.field === null) return true;
   const value = currentInlineEditorValue();
   if (
-    inlineEditState.field === "projectName" ||
-    inlineEditState.field === "projectSummary"
+    viewStateController.state.inlineEdit.field === "projectName" ||
+    viewStateController.state.inlineEdit.field === "projectSummary"
   ) {
     await commitProjectInlineEdit(value);
   } else if (
-    inlineEditState.field === "noteTitle" ||
-    inlineEditState.field === "noteContent"
+    viewStateController.state.inlineEdit.field === "noteTitle" ||
+    viewStateController.state.inlineEdit.field === "noteContent"
   ) {
     await commitNoteInlineEdit(value);
   } else {
     await commitTabInlineEdit(value);
   }
-  return inlineEditState.field === null;
+  return viewStateController.state.inlineEdit.field === null;
 }
 
 function currentInlineEditorValue() {
   const editor = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
     "[data-inline-field]",
   );
-  return editor?.value ?? inlineEditState.draft;
+  return editor?.value ?? viewStateController.state.inlineEdit.draft;
 }
 
 async function deleteTabs(tabIds: number[]) {
@@ -1307,12 +1249,12 @@ async function deleteTabs(tabIds: number[]) {
 
   await runCommand(async () => {
     workspace = await tabsApi.deleteMany(project.id, tabIds);
-    if (activeTabId !== null && tabIds.includes(activeTabId)) {
-      activeTabId = activeProject()?.active_tab_id ?? tabsForProject(project.id)[0]?.id ?? null;
+    if (viewStateController.state.activeTabId !== null && tabIds.includes(viewStateController.state.activeTabId)) {
+      viewStateController.state.activeTabId = activeProject()?.active_tab_id ?? tabsForProject(project.id)[0]?.id ?? null;
     }
-    tabSelection = activeTabId === null
+    viewStateController.state.tabSelection = viewStateController.state.activeTabId === null
       ? emptyMultiSelection()
-      : { selectedIds: [activeTabId], anchorId: activeTabId };
+      : { selectedIds: [viewStateController.state.activeTabId], anchorId: viewStateController.state.activeTabId };
     resetInlineEdit();
     syncFileSelectionFromActiveTab();
     previewText = "No preview";
@@ -1326,7 +1268,7 @@ async function moveTabs(tabIds: number[], targetIndex: number, draggedTabId: num
 
   await runCommand(async () => {
     workspace = await tabsApi.moveMany(project.id, tabIds, targetIndex);
-    activeTabId = draggedTabId;
+    viewStateController.state.activeTabId = draggedTabId;
     resetInlineEdit();
     syncFileSelectionFromActiveTab();
     await loadFilesForActiveTab();
@@ -1339,7 +1281,7 @@ async function selectEntry(entry: FileEntryDto) {
   if (!project || tab?.kind !== "folder") return;
 
   await runCommand(async () => {
-    fileSelectionState = selectSingleFileEntry(fileSelectionState, {
+    viewStateController.state.fileSelection = selectSingleFileEntry(viewStateController.state.fileSelection, {
       path: entry.path,
       isDir: entry.is_dir,
     });
@@ -1362,19 +1304,19 @@ async function persistCheckedEntries(nextState: FileSelectionState) {
   const project = activeProject();
   const tab = activeTab();
   if (!project || tab?.kind !== "folder") return;
-  fileSelectionState = nextState;
+  viewStateController.state.fileSelection = nextState;
   await runCommand(async () => {
     workspace = await invoke<WorkspaceDto>("update_checked_paths", {
       projectId: project.id,
       tabId: tab.id,
-      paths: fileSelectionState.selectedPaths,
+      paths: viewStateController.state.fileSelection.selectedPaths,
     });
     render();
   });
 }
 
 async function toggleCheckedEntry(entry: FileEntryDto) {
-  const nextState = toggleCheckedFileEntry(fileSelectionState, {
+  const nextState = toggleCheckedFileEntry(viewStateController.state.fileSelection, {
     path: entry.path,
     isDir: entry.is_dir,
   });
@@ -1383,7 +1325,7 @@ async function toggleCheckedEntry(entry: FileEntryDto) {
 
 async function checkEntryRange(entry: FileEntryDto) {
   const nextState = checkFileRange(
-    fileSelectionState,
+    viewStateController.state.fileSelection,
     files.map((candidate) => ({ path: candidate.path, isDir: candidate.is_dir })),
     { path: entry.path, isDir: entry.is_dir },
   );
@@ -1459,8 +1401,8 @@ async function confirmTabDelete() {
 }
 
 function tabIdsForDelete(fallbackTabId: number) {
-  return tabSelection.selectedIds.includes(fallbackTabId)
-    ? [...tabSelection.selectedIds]
+  return viewStateController.state.tabSelection.selectedIds.includes(fallbackTabId)
+    ? [...viewStateController.state.tabSelection.selectedIds]
     : [fallbackTabId];
 }
 
@@ -1605,7 +1547,7 @@ async function copyLinkUrl(link: LinkDto) {
 }
 
 function startLinkEdit(link: LinkDto, field: "name" | "url") {
-  editingLink = { id: link.id, field };
+  viewStateController.state.editingLink = { id: link.id, field };
   render();
   window.requestAnimationFrame(() => {
     document.querySelector<HTMLInputElement>(`[data-link-editor="${field}"]`)?.focus();
@@ -1613,11 +1555,11 @@ function startLinkEdit(link: LinkDto, field: "name" | "url") {
 }
 
 async function commitLinkEdit(link: LinkDto, field: "name" | "url", value: string) {
-  if (editingLink?.id !== link.id || editingLink.field !== field) return;
+  if (viewStateController.state.editingLink?.id !== link.id || viewStateController.state.editingLink.field !== field) return;
   const project = activeProject();
   const tab = activeTab();
   if (!project || tab?.kind !== "links") return;
-  editingLink = null;
+  viewStateController.state.editingLink = null;
   await runCommand(async () => {
     workspace = await invoke<WorkspaceDto>("update_link", {
       projectId: project.id,
@@ -1710,7 +1652,7 @@ async function deleteLinks(linkIds: number[]) {
       linkIds,
     });
     previewText = "No preview";
-    editingLink = null;
+    viewStateController.state.editingLink = null;
     render();
   });
 }
@@ -1766,13 +1708,13 @@ async function editNoteFromMenu(field: "noteTitle" | "noteContent") {
 async function deleteNotesFromMenu() {
   const noteId = contextMenus.target("note");
   if (noteId === null) return;
-  const noteIds = noteContextSelection(noteSelection.selectedIds, noteId);
+  const noteIds = noteContextSelection(viewStateController.state.noteSelection.selectedIds, noteId);
   closeNoteContextMenu();
   await deleteNotes(noteIds);
 }
 
 function openNoteContextMenu(noteId: number, pointerX: number, pointerY: number) {
-  const noteIds = noteContextSelection(noteSelection.selectedIds, noteId);
+  const noteIds = noteContextSelection(viewStateController.state.noteSelection.selectedIds, noteId);
   deleteNoteMenuButton.textContent = noteDeleteMenuLabel(noteIds.length);
   contextMenus.open("note", noteId, pointerX, pointerY);
 }
@@ -1793,7 +1735,7 @@ async function openCheckedFiles() {
     }
     return;
   }
-  const paths = fileSelectionState.selectedPaths;
+  const paths = viewStateController.state.fileSelection.selectedPaths;
   if (paths.length === 0) {
     previewText = "Check one or more files first.";
     render();
@@ -1824,7 +1766,7 @@ async function openSelectedPath() {
     if (link) await openLink(link);
     return;
   }
-  const path = fileSelectionState.selectedPath;
+  const path = viewStateController.state.fileSelection.selectedPath;
   if (!project || path === null) return;
   const selectedEntry = files.find((entry) => entry.path === path);
 
@@ -1855,7 +1797,7 @@ async function openRecentFile(path: string) {
 }
 
 async function previewCurrentSelection(shouldRender = true) {
-  const path = previewTargetPath(fileSelectionState);
+  const path = previewTargetPath(viewStateController.state.fileSelection);
   if (!path) {
     previewText = "No preview";
     if (shouldRender) render();
@@ -1876,8 +1818,8 @@ async function previewCurrentSelection(shouldRender = true) {
 function syncFileSelectionFromActiveTab() {
   const tab = activeTab();
   const selectedPath = tab?.kind === "folder" ? tab.selected_path : null;
-  fileSelectionState = {
-    ...fileSelectionState,
+  viewStateController.state.fileSelection = {
+    ...viewStateController.state.fileSelection,
     selectedPath,
     selectedPaths: tab?.kind === "folder" ? tab.checked_paths : [],
   };
@@ -1892,7 +1834,7 @@ async function chooseActiveTabFolder() {
   if (tab?.kind !== "folder") return;
   const selected = await chooseFolderPath(folderDialogDefaultPath(tab.folder_path));
   if (selected !== null) {
-    inlineEditState = startTabFolderEditForChoice(tab.folder_path);
+    viewStateController.state.inlineEdit = startTabFolderEditForChoice(tab.folder_path);
     await commitTabInlineEdit(selected);
   }
 }
@@ -1951,16 +1893,16 @@ async function pruneMissingSelectionsForActiveTab(entries: FileEntryDto[]) {
     isDir: entry.is_dir,
   }));
   const prunedCheckedPaths = pruneCheckedPaths(
-    fileSelectionState.selectedPaths,
+    viewStateController.state.fileSelection.selectedPaths,
     selectionEntries,
   );
   const prunedSelectedPath = pruneSelectedPath(
-    fileSelectionState.selectedPath,
+    viewStateController.state.fileSelection.selectedPath,
     selectionEntries,
   );
 
-  fileSelectionState = {
-    ...fileSelectionState,
+  viewStateController.state.fileSelection = {
+    ...viewStateController.state.fileSelection,
     selectedPath: prunedSelectedPath,
     selectedPaths: prunedCheckedPaths,
   };
@@ -2008,10 +1950,10 @@ function render() {
   openFilesButton.textContent = isLinksTab ? "Open Links" : "Open Checked";
   openFilesButton.disabled = isLinksTab
     ? (tab?.checked_link_ids.length ?? 0) === 0
-    : fileSelectionState.selectedPaths.length === 0;
+    : viewStateController.state.fileSelection.selectedPaths.length === 0;
   openSelectedButton.disabled = isLinksTab
     ? tab?.selected_link_id === null
-    : fileSelectionState.selectedPath === null;
+    : viewStateController.state.fileSelection.selectedPath === null;
   renderActiveTabName(tab);
   if (isLinksTab) {
     activeTabPath.textContent = `${activeLinks.length} link${activeLinks.length === 1 ? "" : "s"}`;
@@ -2067,21 +2009,21 @@ function renderCheckedPaths() {
     checkedPaths.replaceChildren(summary, list);
     return;
   }
-  if (fileSelectionState.selectedPaths.length === 0) {
+  if (viewStateController.state.fileSelection.selectedPaths.length === 0) {
     checkedPaths.textContent = "None";
     return;
   }
 
-  if (fileSelectionState.selectedPaths.length === 1) {
-    checkedPaths.textContent = fileSelectionState.selectedPaths[0];
+  if (viewStateController.state.fileSelection.selectedPaths.length === 1) {
+    checkedPaths.textContent = viewStateController.state.fileSelection.selectedPaths[0];
     return;
   }
 
   const summary = document.createElement("strong");
-  summary.textContent = `${fileSelectionState.selectedPaths.length} items checked`;
+  summary.textContent = `${viewStateController.state.fileSelection.selectedPaths.length} items checked`;
   const list = document.createElement("ul");
   list.className = "path-list";
-  for (const path of fileSelectionState.selectedPaths) {
+  for (const path of viewStateController.state.fileSelection.selectedPaths) {
     const item = document.createElement("li");
     item.textContent = path;
     list.append(item);
@@ -2096,7 +2038,7 @@ function renderSelectedPath() {
       linksForActiveTab().find((link) => link.id === tab.selected_link_id)?.url ?? "None";
     return;
   }
-  selectedPath.textContent = fileSelectionState.selectedPath ?? "None";
+  selectedPath.textContent = viewStateController.state.fileSelection.selectedPath ?? "None";
 }
 
 function renderInlineProjectField(
@@ -2104,7 +2046,7 @@ function renderInlineProjectField(
   field: InlineEditField,
   value: string,
 ) {
-  if (inlineEditState.field !== field || projectEditSurface !== "active-header") {
+  if (viewStateController.state.inlineEdit.field !== field || viewStateController.state.projectEditSurface !== "active-header") {
     container.textContent = value;
     container.classList.toggle(
       "inline-editable-empty",
@@ -2122,10 +2064,10 @@ function renderInlineProjectField(
   const input = document.createElement("input");
   input.className = "inline-editor";
   input.dataset.inlineField = field;
-  input.value = inlineEditState.draft;
+  input.value = viewStateController.state.inlineEdit.draft;
   input.addEventListener("input", () => {
-    inlineEditState = {
-      ...inlineEditState,
+    viewStateController.state.inlineEdit = {
+      ...viewStateController.state.inlineEdit,
       draft: input.value,
     };
   });
@@ -2140,7 +2082,7 @@ function renderInlineProjectField(
     }
   });
   input.addEventListener("blur", async () => {
-    if (inlineEditState.field === field) {
+    if (viewStateController.state.inlineEdit.field === field) {
       await commitProjectInlineEdit(input.value);
     }
   });
@@ -2158,9 +2100,9 @@ function renderActiveTabName(tab: TabDto | null) {
 
   activeTabName.classList.add("editable-active-tab-name");
   if (
-    inlineEditState.field !== "tabName" ||
-    activeTabId !== tab.id ||
-    tabNameEditSurface !== "active-header"
+    viewStateController.state.inlineEdit.field !== "tabName" ||
+    viewStateController.state.activeTabId !== tab.id ||
+    viewStateController.state.tabNameEditSurface !== "active-header"
   ) {
     activeTabName.textContent = tab.name;
     activeTabName.title = "Double-click to edit the tab name";
@@ -2173,10 +2115,10 @@ function renderActiveTabName(tab: TabDto | null) {
   const input = document.createElement("input");
   input.className = "inline-editor active-tab-inline-editor";
   input.dataset.inlineField = "tabName";
-  input.value = inlineEditState.draft;
+  input.value = viewStateController.state.inlineEdit.draft;
   input.addEventListener("input", () => {
-    inlineEditState = {
-      ...inlineEditState,
+    viewStateController.state.inlineEdit = {
+      ...viewStateController.state.inlineEdit,
       draft: input.value,
     };
   });
@@ -2190,7 +2132,7 @@ function renderActiveTabName(tab: TabDto | null) {
     }
   });
   input.addEventListener("blur", async () => {
-    if (inlineEditState.field === "tabName") {
+    if (viewStateController.state.inlineEdit.field === "tabName") {
       await commitTabInlineEdit(input.value);
     }
   });
@@ -2198,7 +2140,7 @@ function renderActiveTabName(tab: TabDto | null) {
 }
 
 function renderInlineTabFolder(container: HTMLElement, value: string) {
-  if (inlineEditState.field !== "tabFolder") {
+  if (viewStateController.state.inlineEdit.field !== "tabFolder") {
     if (value.length === 0) {
       const prompt = emptyTabFolderPrompt();
       const state = document.createElement("span");
@@ -2226,10 +2168,10 @@ function renderInlineTabFolder(container: HTMLElement, value: string) {
   const input = document.createElement("input");
   input.className = "inline-editor";
   input.dataset.inlineField = "tabFolder";
-  input.value = inlineEditState.draft;
+  input.value = viewStateController.state.inlineEdit.draft;
   input.addEventListener("input", () => {
-    inlineEditState = {
-      ...inlineEditState,
+    viewStateController.state.inlineEdit = {
+      ...viewStateController.state.inlineEdit,
       draft: input.value,
     };
   });
@@ -2243,7 +2185,7 @@ function renderInlineTabFolder(container: HTMLElement, value: string) {
     }
   });
   input.addEventListener("blur", async () => {
-    if (inlineEditState.field === "tabFolder") {
+    if (viewStateController.state.inlineEdit.field === "tabFolder") {
       await commitTabInlineEdit(input.value);
     }
   });
@@ -2272,21 +2214,21 @@ function renderProjects() {
     ...sortProjectsForDisplay(workspace.projects, projectSortMode, projectCustomOrder).map((project) => {
       const item = document.createElement("div");
       item.className = "project-item";
-      item.classList.toggle("is-active", project.id === activeProjectId);
-      item.classList.toggle("is-selected", projectSelection.selectedIds.includes(project.id));
+      item.classList.toggle("is-active", project.id === viewStateController.state.activeProjectId);
+      item.classList.toggle("is-selected", viewStateController.state.projectSelection.selectedIds.includes(project.id));
       item.dataset.projectId = String(project.id);
       item.tabIndex = 0;
       item.setAttribute("role", "button");
-      item.setAttribute("aria-pressed", String(projectSelection.selectedIds.includes(project.id)));
+      item.setAttribute("aria-pressed", String(viewStateController.state.projectSelection.selectedIds.includes(project.id)));
       item.classList.toggle("is-custom-sort", projectSortMode === "custom");
       projectDragController.bind(item, project.id);
       bindProjectItemInteractions(
         item,
         project.id,
         {
-          hasActiveEdit: inlineEditState.field !== null,
+          hasActiveEdit: viewStateController.state.inlineEdit.field !== null,
           editingThisItem:
-            projectEditSurface === "project-list" && editingProjectId === project.id,
+            viewStateController.state.projectEditSurface === "project-list" && viewStateController.state.editingProjectId === project.id,
           suppressClick: () => {
             if (!suppressProjectClick) return false;
             suppressProjectClick = false;
@@ -2310,7 +2252,7 @@ function renderProjects() {
 
       const selectionIndicator = document.createElement("span");
       selectionIndicator.className = "selection-indicator";
-      selectionIndicator.textContent = projectSelection.selectedIds.includes(project.id) ? "✓" : "";
+      selectionIndicator.textContent = viewStateController.state.projectSelection.selectedIds.includes(project.id) ? "✓" : "";
       selectionIndicator.setAttribute("aria-hidden", "true");
 
       item.append(
@@ -2329,19 +2271,19 @@ function renderProjectListField(project: ProjectDto, field: InlineEditField) {
     project,
     field,
     {
-      inlineEdit: inlineEditState,
-      editingProjectId,
-      editSurface: projectEditSurface,
+      inlineEdit: viewStateController.state.inlineEdit,
+      editingProjectId: viewStateController.state.editingProjectId,
+      editSurface: viewStateController.state.projectEditSurface,
     },
     {
       startEdit: (nextField, projectId) =>
         startProjectInlineEdit(nextField, projectId, "project-list"),
-      updateDraft: (value) => { inlineEditState = { ...inlineEditState, draft: value }; },
+      updateDraft: (value) => { viewStateController.state.inlineEdit = { ...viewStateController.state.inlineEdit, draft: value }; },
       commitEdit: commitProjectInlineEdit,
       isEditing: (projectId, nextField) =>
-        inlineEditState.field === nextField &&
-        editingProjectId === projectId &&
-        projectEditSurface === "project-list",
+        viewStateController.state.inlineEdit.field === nextField &&
+        viewStateController.state.editingProjectId === projectId &&
+        viewStateController.state.projectEditSurface === "project-list",
     },
   );
 }
@@ -2360,10 +2302,10 @@ function renderNotes() {
       hasProject: Boolean(project),
       notes: projectNotes,
       activeNote: note,
-      selectedIds: noteSelection.selectedIds,
+      selectedIds: viewStateController.state.noteSelection.selectedIds,
       panelState: notePanelController.state,
-      inlineEdit: inlineEditState,
-      editingNoteId,
+      inlineEdit: viewStateController.state.inlineEdit,
+      editingNoteId: viewStateController.state.editingNoteId,
     },
     {
       applyHeight: applyNotePanelHeight,
@@ -2374,11 +2316,11 @@ function renderNotes() {
       prepareContextMenu: prepareNoteContextMenu,
       startEdit: startNoteInlineEdit,
       updateDraft: (value) => {
-        inlineEditState = { ...inlineEditState, draft: value };
+        viewStateController.state.inlineEdit = { ...viewStateController.state.inlineEdit, draft: value };
       },
       commitEdit: commitNoteInlineEdit,
       isEditing: (noteId, field) =>
-        inlineEditState.field === field && editingNoteId === noteId,
+        viewStateController.state.inlineEdit.field === field && viewStateController.state.editingNoteId === noteId,
     },
   );
 }
@@ -2395,22 +2337,22 @@ function renderTabs() {
   tabBarRenderer.render(
     {
       tabs,
-      activeTabId,
-      selection: tabSelection,
-      inlineEdit: inlineEditState,
-      editSurface: tabNameEditSurface,
+      activeTabId: viewStateController.state.activeTabId,
+      selection: viewStateController.state.tabSelection,
+      inlineEdit: viewStateController.state.inlineEdit,
+      editSurface: viewStateController.state.tabNameEditSurface,
     },
     {
-      getActiveTabId: () => activeTabId,
-      getSelection: () => tabSelection,
-      setSelection: (selection) => { tabSelection = selection; },
+      getActiveTabId: () => viewStateController.state.activeTabId,
+      getSelection: () => viewStateController.state.tabSelection,
+      setSelection: (selection) => { viewStateController.state.tabSelection = selection; },
       startNameEdit: (tabId) => startTabInlineEdit("tabName", tabId),
-      updateDraft: (value) => { inlineEditState = { ...inlineEditState, draft: value }; },
+      updateDraft: (value) => { viewStateController.state.inlineEdit = { ...viewStateController.state.inlineEdit, draft: value }; },
       commitEdit: commitTabInlineEdit,
       isNameEditing: (tabId) =>
-        inlineEditState.field === "tabName" &&
-        activeTabId === tabId &&
-        tabNameEditSurface === "tab-bar",
+        viewStateController.state.inlineEdit.field === "tabName" &&
+        viewStateController.state.activeTabId === tabId &&
+        viewStateController.state.tabNameEditSurface === "tab-bar",
       finishCurrentEdit: finishCurrentInlineEdit,
       activate: activateTab,
       move: moveTabs,
@@ -2429,7 +2371,7 @@ function renderFiles() {
   folderListRenderer.render(
     {
       entries: files,
-      selection: fileSelectionState,
+      selection: viewStateController.state.fileSelection,
       errorMessage,
       hasActiveTab: Boolean(tab),
       folderPath: tab?.kind === "folder" ? tab.folder_path : undefined,
@@ -2499,9 +2441,9 @@ function renderRecent() {
 }
 
 function resetTabSelectionToActive() {
-  tabSelection = activeTabId === null
+  viewStateController.state.tabSelection = viewStateController.state.activeTabId === null
     ? emptyMultiSelection()
-    : { selectedIds: [activeTabId], anchorId: activeTabId };
+    : { selectedIds: [viewStateController.state.activeTabId], anchorId: viewStateController.state.activeTabId };
 }
 
 function renderLinks() {
@@ -2513,7 +2455,7 @@ function renderLinks() {
       links,
       selectedLinkId: tab.selected_link_id,
       checkedLinkIds: tab.checked_link_ids,
-      editing: editingLink,
+      editing: viewStateController.state.editingLink,
       copiedLinkId,
       errorMessage,
     },
@@ -2524,7 +2466,7 @@ function renderLinks() {
       copy: (link) => { void copyLinkUrl(link); },
       startEdit: startLinkEdit,
       cancelEdit: () => {
-        editingLink = null;
+        viewStateController.state.editingLink = null;
         render();
       },
       commitEdit: (link, field, value) => { void commitLinkEdit(link, field, value); },
@@ -2545,11 +2487,11 @@ async function runCommand(command: () => Promise<void>) {
 }
 
 function activeProject() {
-  return workspace.projects.find((project) => project.id === activeProjectId) ?? null;
+  return workspace.projects.find((project) => project.id === viewStateController.state.activeProjectId) ?? null;
 }
 
 function activeTab() {
-  return workspace.tabs.find((tab) => tab.id === activeTabId) ?? null;
+  return workspace.tabs.find((tab) => tab.id === viewStateController.state.activeTabId) ?? null;
 }
 
 function activeNote() {
@@ -2565,9 +2507,9 @@ function tabsForProject(projectId: number) {
 }
 
 function linksForActiveTab() {
-  if (activeTabId === null) return [];
+  if (viewStateController.state.activeTabId === null) return [];
   return workspace.links
-    .filter((link) => link.tab_id === activeTabId)
+    .filter((link) => link.tab_id === viewStateController.state.activeTabId)
     .sort((left, right) => left.position - right.position);
 }
 
