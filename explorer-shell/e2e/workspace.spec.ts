@@ -32,6 +32,16 @@ test("creates, edits, switches, and reorders workspace tabs", async ({ page }) =
     "Edited summary",
   );
 
+  const inactiveProject = page.locator(".project-item").filter({ hasText: "Renamed Project" });
+  await inactiveProject.locator("strong").dblclick();
+  const inactiveProjectEditor = page.locator('input[data-inline-field="projectName"]');
+  await expect(inactiveProjectEditor).toBeVisible();
+  await inactiveProjectEditor.fill("Edited While Inactive");
+  await inactiveProjectEditor.press("Enter");
+  await expect(page.locator("#active-project-name")).toHaveText("Edited While Inactive");
+
+  await page.locator(".project-item").filter({ hasText: "First Project" }).click();
+
   await page.locator("#add-tab-button").click();
   await expect(page.locator("#add-tab-menu")).toBeVisible();
   await page.locator("#add-folder-tab-button").click();
@@ -55,4 +65,43 @@ test("creates, edits, switches, and reorders workspace tabs", async ({ page }) =
 
   await page.locator(".tab-item").filter({ hasText: "Reports 2026" }).dragTo(defaultTab);
   await expect(page.locator(".tab-name-label").first()).toHaveText("Reports 2026");
+
+  const reports2026Tab = page.locator(".tab-item").filter({ hasText: "Reports 2026" });
+  await defaultTab.locator(".tab-button").click({ modifiers: ["Control"] });
+  await expect(page.locator(".tab-item.is-selected")).toHaveCount(2);
+  await reports2026Tab.click({ button: "right" });
+  await expect(page.locator("#delete-tab-menu-button")).toHaveText("Delete 2 Tabs");
+  await page.locator("#delete-tab-menu-button").click();
+  await expect(page.locator("#delete-tab-dialog-title")).toHaveText("Delete 2 tabs?");
+  await page.locator("#confirm-delete-tab-button").click();
+  await expect(page.locator(".tab-item")).toHaveCount(0);
+  await page.locator("#undo-button").click();
+  await expect(page.locator(".tab-item")).toHaveCount(2);
+
+  const editedProject = page.locator(".project-item").filter({ hasText: "Edited While Inactive" });
+  await page.locator(".project-item").filter({ hasText: "First Project" }).click();
+  await editedProject.click({ modifiers: ["Control"] });
+  await expect(page.locator(".project-item.is-selected")).toHaveCount(2);
+
+  await editedProject.click({ button: "right" });
+  await expect(page.locator("#project-context-menu")).toBeVisible();
+  await expect(page.locator("#delete-project-menu-button")).toHaveText("Delete 2 Projects");
+  await page.locator("#delete-project-menu-button").click();
+
+  await expect(page.locator("#delete-project-dialog")).toBeVisible();
+  await expect(page.locator("#delete-project-dialog-title")).toHaveText("Delete 2 projects?");
+  await expect(page.locator("#delete-project-dialog-detail")).toContainText("First Project");
+  await expect(page.locator("#delete-project-dialog-detail")).toContainText(
+    "Edited While Inactive",
+  );
+  await page.locator("#confirm-delete-project-button").click();
+  await expect(page.locator(".project-item")).toHaveCount(0);
+
+  await expect(page.locator("#undo-button")).toBeEnabled();
+  await page.locator("#undo-button").click();
+  await expect(page.locator(".project-item")).toHaveCount(2);
+  await expect(page.locator(".project-item")).toContainText([
+    "First Project",
+    "Edited While Inactive",
+  ]);
 });

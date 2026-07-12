@@ -220,6 +220,7 @@ let fileSelectionState: FileSelectionState = initialFileSelectionState();
 let projectSortMode: ProjectSortMode = "custom";
 let projectCustomOrder: number[] = [];
 let suppressProjectClick = false;
+let projectInteractionRevision = 0;
 let sidebarCollapsed = false;
 let projectSelection: MultiSelectionState = emptyMultiSelection();
 let noteSelection: MultiSelectionState = emptyMultiSelection();
@@ -775,6 +776,7 @@ function startProjectInlineEdit(
   projectId = activeProjectId,
   surface: "active-header" | "project-list" = "active-header",
 ) {
+  projectInteractionRevision += 1;
   const project =
     projectId === null ? null : workspace.projects.find((candidate) => candidate.id === projectId);
   if (!project) return;
@@ -1145,7 +1147,7 @@ async function addTab(kind: "folder" | "links") {
   });
 }
 
-async function activateProject(projectId: number) {
+async function activateProject(projectId: number, shouldRender = true) {
   const projectChanged = activeProjectId !== projectId;
   activeProjectId = projectId;
   activeTabId = activeProject()?.active_tab_id ?? tabsForProject(projectId)[0]?.id ?? null;
@@ -1159,7 +1161,8 @@ async function activateProject(projectId: number) {
   }
   syncFileSelectionFromActiveTab();
   previewText = "No preview";
-  await loadFilesForActiveTab();
+  await loadFilesForActiveTab(false);
+  if (shouldRender) render();
 }
 
 async function selectProjectFromPointer(projectId: number, event: MouseEvent) {
@@ -1176,8 +1179,10 @@ async function selectProjectFromPointer(projectId: number, event: MouseEvent) {
     nextSelection.selectedIds.every((id, index) => id === projectSelection.selectedIds[index]);
   if (activeProjectId === projectId && selectionUnchanged) return;
 
+  const revision = ++projectInteractionRevision;
   projectSelection = nextSelection;
-  await activateProject(projectId);
+  await activateProject(projectId, false);
+  if (revision !== projectInteractionRevision) return;
   render();
 }
 
