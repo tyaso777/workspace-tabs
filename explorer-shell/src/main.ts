@@ -60,6 +60,8 @@ import {
   File as FileIcon,
   Link as LinkIcon,
   Check as CheckIcon,
+  Maximize2 as MaximizeIcon,
+  Minimize2 as RestoreIcon,
   createElement as createLucideElement,
 } from "lucide";
 import {
@@ -68,7 +70,15 @@ import {
   projectMenuEditField,
   projectMenuPosition,
 } from "./projectMenu";
-import { activeNoteForProject, notePanelView, notesForProject } from "./notePanel";
+import {
+  DEFAULT_NOTE_PANEL_HEIGHT,
+  clampNotePanelHeight,
+  activeNoteForProject,
+  notePanelView,
+  notesForProject,
+  toggleNotePanelMaximized,
+  type NotePanelState,
+} from "./notePanel";
 import {
   noteContextSelection,
   noteDeleteMenuLabel,
@@ -231,7 +241,8 @@ let projectPointerState: ProjectPointerState = initialProjectPointerState();
 let draggedProjectIds: number[] = [];
 let suppressProjectClick = false;
 let sidebarCollapsed = false;
-let notesExpanded = false;
+let notePanelState: NotePanelState = { customHeight: null, maximized: false };
+let notePanelResize: { pointerId: number; startY: number; startHeight: number } | null = null;
 let projectSelection: MultiSelectionState = emptyMultiSelection();
 let noteSelection: MultiSelectionState = emptyMultiSelection();
 let tabSelection: MultiSelectionState = emptyMultiSelection();
@@ -282,6 +293,7 @@ const activeNoteContent = element<HTMLElement>("#active-note-content");
 const addNoteButton = element<HTMLButtonElement>("#add-note-button");
 const deleteNoteButton = element<HTMLButtonElement>("#delete-note-button");
 const toggleNotesSizeButton = element<HTMLButtonElement>("#toggle-notes-size-button");
+const notesResizeHandle = element<HTMLElement>("#notes-resize-handle");
 const undoButton = element<HTMLButtonElement>("#undo-button");
 const undoHint = element<HTMLElement>("#undo-hint");
 const deleteProjectButton = element<HTMLButtonElement>("#delete-project-button");
@@ -371,6 +383,12 @@ window.addEventListener("DOMContentLoaded", async () => {
   addNoteButton.addEventListener("click", addNote);
   deleteNoteButton.addEventListener("click", deleteActiveNote);
   toggleNotesSizeButton.addEventListener("click", toggleNotesSize);
+  notesResizeHandle.addEventListener("pointerdown", startNotesResize);
+  notesResizeHandle.addEventListener("pointermove", moveNotesResize);
+  notesResizeHandle.addEventListener("pointerup", finishNotesResize);
+  notesResizeHandle.addEventListener("pointercancel", finishNotesResize);
+  notesResizeHandle.addEventListener("dblclick", resetNotesHeight);
+  window.addEventListener("resize", applyNotePanelHeight);
   undoButton.addEventListener("click", undoLast);
   deleteProjectButton.addEventListener("click", requestActiveProjectDelete);
   sidebarToggleButton.addEventListener("click", toggleSidebar);
@@ -474,7 +492,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   await loadStorageInfo();
   await loadSidebarCollapsed();
-  await loadNotesExpanded();
+  await loadNotePanelState();
   await loadProjectSortMode();
   await loadProjectCustomOrder();
   await loadWorkspace();
@@ -609,11 +627,13 @@ async function loadSidebarCollapsed() {
   }
 }
 
-async function loadNotesExpanded() {
+async function loadNotePanelState() {
   try {
-    notesExpanded = await invoke<boolean>("load_notes_expanded");
+    const customHeight = await invoke<number | null>("load_notes_custom_height");
+    const maximized = await invoke<boolean>("load_notes_maximized");
+    notePanelState = { customHeight, maximized };
   } catch {
-    notesExpanded = false;
+    notePanelState = { customHeight: null, maximized: false };
   }
 }
 
@@ -646,10 +666,72 @@ async function toggleSidebar() {
 }
 
 async function toggleNotesSize() {
-  notesExpanded = !notesExpanded;
+  notePanelState = toggleNotePanelMaximized(notePanelState);
   render();
   await runCommand(async () => {
-    await invoke("save_notes_expanded", { expanded: notesExpanded });
+    await invoke("save_notes_maximized", { maximized: notePanelState.maximized });
+  });
+}
+
+function maximumNotePanelHeight() {
+  return Math.max(150, window.innerHeight - notesPanel.getBoundingClientRect().top - 16);
+}
+
+function currentNormalNotePanelHeight() {
+  return notePanelState.customHeight ?? DEFAULT_NOTE_PANEL_HEIGHT;
+}
+
+function applyNotePanelHeight() {
+  const requested = notePanelState.maximized
+    ? maximumNotePanelHeight()
+    : currentNormalNotePanelHeight();
+  notesPanel.style.height = `${clampNotePanelHeight(requested, maximumNotePanelHeight())}px`;
+}
+
+function startNotesResize(event: PointerEvent) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  notePanelResize = {
+    pointerId: event.pointerId,
+    startY: event.clientY,
+    startHeight: notesPanel.getBoundingClientRect().height,
+  };
+  notePanelState = { customHeight: notePanelResize.startHeight, maximized: false };
+  notesPanel.classList.add("is-resizing");
+  notesResizeHandle.setPointerCapture(event.pointerId);
+}
+
+function moveNotesResize(event: PointerEvent) {
+  if (!notePanelResize || event.pointerId !== notePanelResize.pointerId) return;
+  const height = clampNotePanelHeight(
+    notePanelResize.startHeight + event.clientY - notePanelResize.startY,
+    maximumNotePanelHeight(),
+  );
+  notePanelState = { customHeight: Math.round(height), maximized: false };
+  applyNotePanelHeight();
+}
+
+async function finishNotesResize(event: PointerEvent) {
+  if (!notePanelResize || event.pointerId !== notePanelResize.pointerId) return;
+  notePanelResize = null;
+  notesPanel.classList.remove("is-resizing");
+  if (notesResizeHandle.hasPointerCapture(event.pointerId)) {
+    notesResizeHandle.releasePointerCapture(event.pointerId);
+  }
+  await saveNotePanelState();
+  renderNotes();
+}
+
+async function resetNotesHeight() {
+  notePanelState = { customHeight: null, maximized: false };
+  renderNotes();
+  await saveNotePanelState();
+}
+
+async function saveNotePanelState() {
+  await runCommand(async () => {
+    await invoke("save_notes_custom_height", { height: notePanelState.customHeight });
+    await invoke("save_notes_maximized", { maximized: notePanelState.maximized });
   });
 }
 
@@ -2575,15 +2657,23 @@ function renderNotes() {
   const project = activeProject();
   const projectNotes = project ? notesForProject(workspace.notes, project.id) : [];
   const note = activeNote();
-  const view = notePanelView(notesExpanded);
+  const view = notePanelView(notePanelState);
 
-  notesPanel.className = view.className;
+  const resizing = notesPanel.classList.contains("is-resizing");
+  notesPanel.className = `${view.className}${resizing ? " is-resizing" : ""}`;
   notesCount.textContent = `(${projectNotes.length})`;
-  toggleNotesSizeButton.textContent = view.toggleLabel;
+  toggleNotesSizeButton.replaceChildren(
+    createLucideElement(notePanelState.maximized ? RestoreIcon : MaximizeIcon, {
+      width: 17,
+      height: 17,
+      "aria-hidden": "true",
+    }),
+  );
   toggleNotesSizeButton.title = view.toggleTitle;
   toggleNotesSizeButton.setAttribute("aria-label", view.toggleTitle);
   addNoteButton.disabled = !project;
   deleteNoteButton.disabled = !note;
+  applyNotePanelHeight();
 
   noteList.replaceChildren(
     ...projectNotes.map((candidate) => {

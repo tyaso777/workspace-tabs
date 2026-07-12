@@ -487,11 +487,16 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
                 .map_err(err)?;
             Ok(Value::Null)
         }
-        "load_notes_expanded" => to_value(lock(&state.store)?.load_notes_expanded().map_err(err)?),
-        "save_notes_expanded" => {
+        "load_notes_custom_height" => to_value(lock(&state.store)?.load_notes_custom_height().map_err(err)?),
+        "save_notes_custom_height" => {
             lock(&state.store)?
-                .save_notes_expanded(bool_arg(&args, "expanded")?)
+                .save_notes_custom_height(optional_u32_arg(&args, "height")?)
                 .map_err(err)?;
+            Ok(Value::Null)
+        }
+        "load_notes_maximized" => to_value(lock(&state.store)?.load_notes_maximized().map_err(err)?),
+        "save_notes_maximized" => {
+            lock(&state.store)?.save_notes_maximized(bool_arg(&args, "maximized")?).map_err(err)?;
             Ok(Value::Null)
         }
         "create_project" => mutate_workspace(state, |workspace| {
@@ -1031,6 +1036,14 @@ fn u32_arg(args: &Value, key: &str) -> Result<u32, String> {
     u64_arg(args, key)?
         .try_into()
         .map_err(|_| format!("argument is too large: {key}"))
+}
+
+fn optional_u32_arg(args: &Value, key: &str) -> Result<Option<u32>, String> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value.as_u64().map(|value| Some(value as u32))
+            .ok_or_else(|| format!("invalid {key}")),
+    }
 }
 
 fn usize_arg(args: &Value, key: &str) -> Result<usize, String> {

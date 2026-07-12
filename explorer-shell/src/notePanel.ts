@@ -6,6 +6,14 @@ export type NoteView = {
   position: number;
 };
 
+export type NotePanelState = {
+  customHeight: number | null;
+  maximized: boolean;
+};
+
+export const DEFAULT_NOTE_PANEL_HEIGHT = 190;
+export const MIN_NOTE_PANEL_HEIGHT = 150;
+
 export function notesForProject<T extends NoteView>(notes: T[], projectId: number): T[] {
   return notes
     .filter((note) => note.project_id === projectId)
@@ -21,16 +29,22 @@ export function activeNoteForProject<T extends NoteView>(
   return projectNotes.find((note) => note.id === activeNoteId) ?? projectNotes[0] ?? null;
 }
 
-export function notePanelView(expanded: boolean) {
-  return expanded
-    ? {
-        className: "notes-panel is-expanded",
-        toggleLabel: "⤡",
-        toggleTitle: "Compact Notes",
-      }
+export function notePanelView(state: NotePanelState) {
+  return state.maximized
+    ? { className: "notes-panel is-maximized", toggleTitle: "Restore Notes Height" }
     : {
-        className: "notes-panel is-compact",
-        toggleLabel: "⤢",
-        toggleTitle: "Expand Notes",
+        className: state.customHeight === null ? "notes-panel is-default" : "notes-panel is-custom",
+        toggleTitle: "Maximize Notes",
       };
+}
+
+export function toggleNotePanelMaximized(state: NotePanelState): NotePanelState {
+  return { ...state, maximized: !state.maximized };
+}
+
+export function clampNotePanelHeight(height: number, maximumHeight: number): number {
+  return Math.min(
+    Math.max(height, MIN_NOTE_PANEL_HEIGHT),
+    Math.max(MIN_NOTE_PANEL_HEIGHT, maximumHeight),
+  );
 }

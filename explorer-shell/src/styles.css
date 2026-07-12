@@ -445,6 +445,7 @@ button.is-active {
 }
 
 .notes-panel {
+  position: relative;
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
@@ -458,12 +459,41 @@ button.is-active {
   transition: height 160ms ease;
 }
 
-.notes-panel.is-compact {
+.notes-panel.is-default {
   height: 190px;
 }
 
-.notes-panel.is-expanded {
-  height: clamp(300px, 42vh, 460px);
+.notes-panel.is-resizing {
+  transition: none;
+  user-select: none;
+}
+
+.notes-resize-handle {
+  position: absolute;
+  right: 12px;
+  bottom: 1px;
+  left: 12px;
+  height: 8px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.notes-resize-handle::after {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  width: 42px;
+  height: 2px;
+  content: "";
+  border-radius: 1px;
+  background: #9eabb5;
+  transform: translateX(-50%);
+}
+
+.notes-resize-handle:hover::after,
+.notes-panel.is-resizing .notes-resize-handle::after {
+  height: 3px;
+  background: #287d99;
 }
 
 .notes-panel-header,

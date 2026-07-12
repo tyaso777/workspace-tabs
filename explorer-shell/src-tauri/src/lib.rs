@@ -179,22 +179,35 @@ fn save_sidebar_collapsed(state: State<'_, AppState>, collapsed: bool) -> Result
 }
 
 #[tauri::command]
-fn load_notes_expanded(state: State<'_, AppState>) -> Result<bool, String> {
+fn load_notes_custom_height(state: State<'_, AppState>) -> Result<Option<u32>, String> {
     state
         .store
         .lock()
         .map_err(|error| error.to_string())?
-        .load_notes_expanded()
+        .load_notes_custom_height()
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn save_notes_expanded(state: State<'_, AppState>, expanded: bool) -> Result<(), String> {
+fn save_notes_custom_height(state: State<'_, AppState>, height: Option<u32>) -> Result<(), String> {
     state
         .store
         .lock()
         .map_err(|error| error.to_string())?
-        .save_notes_expanded(expanded)
+        .save_notes_custom_height(height)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn load_notes_maximized(state: State<'_, AppState>) -> Result<bool, String> {
+    state.store.lock().map_err(|error| error.to_string())?
+        .load_notes_maximized().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_notes_maximized(state: State<'_, AppState>, maximized: bool) -> Result<(), String> {
+    state.store.lock().map_err(|error| error.to_string())?
+        .save_notes_maximized(maximized)
         .map_err(|error| error.to_string())
 }
 
@@ -931,8 +944,10 @@ pub fn run() {
             save_project_custom_order,
             load_sidebar_collapsed,
             save_sidebar_collapsed,
-            load_notes_expanded,
-            save_notes_expanded,
+            load_notes_custom_height,
+            save_notes_custom_height,
+            load_notes_maximized,
+            save_notes_maximized,
             open_storage_folder,
             watch_folder
         ])

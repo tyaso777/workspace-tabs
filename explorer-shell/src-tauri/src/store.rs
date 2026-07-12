@@ -229,9 +229,15 @@ impl SqliteWorkspaceStore {
             .unwrap_or(false))
     }
 
-    pub fn load_notes_expanded(&self) -> Result<bool, StoreError> {
+    pub fn load_notes_custom_height(&self) -> Result<Option<u32>, StoreError> {
         Ok(self
-            .load_app_state_value("notes_expanded")?
+            .load_app_state_value("notes_custom_height")?
+            .and_then(|value| value.parse::<u32>().ok()))
+    }
+
+    pub fn load_notes_maximized(&self) -> Result<bool, StoreError> {
+        Ok(self
+            .load_app_state_value("notes_maximized")?
             .map(|value| value == "true")
             .unwrap_or(false))
     }
@@ -291,11 +297,24 @@ impl SqliteWorkspaceStore {
         Ok(())
     }
 
-    pub fn save_notes_expanded(&mut self, expanded: bool) -> Result<(), StoreError> {
+    pub fn save_notes_custom_height(&mut self, height: Option<u32>) -> Result<(), StoreError> {
+        if let Some(height) = height {
+            self.conn.execute(
+                "INSERT INTO app_state (key, value) VALUES ('notes_custom_height', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![height.to_string()],
+            )?;
+        } else {
+            self.conn.execute("DELETE FROM app_state WHERE key = 'notes_custom_height'", [])?;
+        }
+        Ok(())
+    }
+
+    pub fn save_notes_maximized(&mut self, maximized: bool) -> Result<(), StoreError> {
         self.conn.execute(
-            "INSERT INTO app_state (key, value) VALUES ('notes_expanded', ?1)
+            "INSERT INTO app_state (key, value) VALUES ('notes_maximized', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![expanded.to_string()],
+            params![maximized.to_string()],
         )?;
         Ok(())
     }
@@ -1025,14 +1044,16 @@ mod tests {
         store.save_window_height(777).unwrap();
         store.save_project_sort_mode("name").unwrap();
         store.save_sidebar_collapsed(true).unwrap();
-        store.save_notes_expanded(true).unwrap();
+        store.save_notes_custom_height(Some(284)).unwrap();
+        store.save_notes_maximized(true).unwrap();
         store.save_workspace(&workspace).unwrap();
 
         assert_eq!(store.load_window_width().unwrap(), Some(1234));
         assert_eq!(store.load_window_height().unwrap(), Some(777));
         assert_eq!(store.load_project_sort_mode().unwrap(), "name");
         assert!(store.load_sidebar_collapsed().unwrap());
-        assert!(store.load_notes_expanded().unwrap());
+        assert_eq!(store.load_notes_custom_height().unwrap(), Some(284));
+        assert!(store.load_notes_maximized().unwrap());
     }
 
     #[test]
@@ -1069,13 +1090,18 @@ mod tests {
     }
 
     #[test]
-    fn notes_expanded_defaults_to_compact_and_can_be_saved() {
+    fn notes_panel_state_defaults_and_round_trips() {
         let mut store = SqliteWorkspaceStore::in_memory().unwrap();
 
-        assert!(!store.load_notes_expanded().unwrap());
-        store.save_notes_expanded(true).unwrap();
-        assert!(store.load_notes_expanded().unwrap());
-        store.save_notes_expanded(false).unwrap();
-        assert!(!store.load_notes_expanded().unwrap());
+        assert_eq!(store.load_notes_custom_height().unwrap(), None);
+        assert!(!store.load_notes_maximized().unwrap());
+        store.save_notes_custom_height(Some(315)).unwrap();
+        store.save_notes_maximized(true).unwrap();
+        assert_eq!(store.load_notes_custom_height().unwrap(), Some(315));
+        assert!(store.load_notes_maximized().unwrap());
+        store.save_notes_custom_height(None).unwrap();
+        store.save_notes_maximized(false).unwrap();
+        assert_eq!(store.load_notes_custom_height().unwrap(), None);
+        assert!(!store.load_notes_maximized().unwrap());
     }
 }

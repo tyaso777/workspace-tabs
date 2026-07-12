@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { activeNoteForProject, notePanelView, notesForProject } from "./notePanel";
+import {
+  activeNoteForProject,
+  clampNotePanelHeight,
+  notePanelView,
+  notesForProject,
+  toggleNotePanelMaximized,
+} from "./notePanel";
 
 const notes = [
   { id: 3, project_id: 2, title: "Third", content: "C", position: 1 },
@@ -24,19 +30,33 @@ describe("activeNoteForProject", () => {
 });
 
 describe("notePanelView", () => {
-  it("uses compact mode by default", () => {
-    expect(notePanelView(false)).toEqual({
-      className: "notes-panel is-compact",
-      toggleLabel: "⤢",
-      toggleTitle: "Expand Notes",
+  it("uses default mode when no custom height was saved", () => {
+    expect(notePanelView({ customHeight: null, maximized: false })).toEqual({
+      className: "notes-panel is-default",
+      toggleTitle: "Maximize Notes",
     });
   });
 
-  it("uses a compact action while expanded", () => {
-    expect(notePanelView(true)).toEqual({
-      className: "notes-panel is-expanded",
-      toggleLabel: "⤡",
-      toggleTitle: "Compact Notes",
+  it("offers to restore the previous height while maximized", () => {
+    expect(notePanelView({ customHeight: 280, maximized: true })).toEqual({
+      className: "notes-panel is-maximized",
+      toggleTitle: "Restore Notes Height",
     });
+  });
+});
+
+describe("toggleNotePanelMaximized", () => {
+  it("preserves the custom height across maximize and restore", () => {
+    const custom = { customHeight: 280, maximized: false };
+    expect(toggleNotePanelMaximized(custom)).toEqual({ customHeight: 280, maximized: true });
+    expect(toggleNotePanelMaximized(toggleNotePanelMaximized(custom))).toEqual(custom);
+  });
+});
+
+describe("clampNotePanelHeight", () => {
+  it("keeps a dragged height inside the usable range", () => {
+    expect(clampNotePanelHeight(80, 420)).toBe(150);
+    expect(clampNotePanelHeight(300, 420)).toBe(300);
+    expect(clampNotePanelHeight(700, 420)).toBe(420);
   });
 });
