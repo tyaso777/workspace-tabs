@@ -30,6 +30,23 @@ describe("project item interactions DOM", () => {
     expect(handler.selectFromPointer).toHaveBeenCalledWith(7, expect.any(MouseEvent));
   });
 
+  it("preserves Ctrl and Shift modifiers for multi-selection", () => {
+    const item = document.createElement("div");
+    const handler = actions();
+    bindProjectItemInteractions(item, 7, {
+      hasActiveEdit: false,
+      editingThisItem: false,
+      suppressClick: () => false,
+    }, handler);
+
+    item.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true, shiftKey: true }));
+
+    expect(handler.selectFromPointer).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ ctrlKey: true, shiftKey: true }),
+    );
+  });
+
   it("finishes editing and selects another project from one mousedown", async () => {
     const item = document.createElement("div");
     const handler = actions();

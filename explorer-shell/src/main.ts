@@ -41,17 +41,14 @@ import {
   type FolderChangedPayload,
 } from "./folderWatch";
 import {
-  initialProjectPointerState,
-  moveProjectsInCustomOrder,
   normalizeProjectCustomOrder,
   normalizeProjectSortMode,
   sortProjectsForDisplay,
-  startProjectPointerDrag,
-  updateProjectPointerDrag,
-  type ProjectPointerState,
   type ProjectSortMode,
 } from "./projectSort";
+import { ProjectDragController } from "./projectDragController";
 import { bindProjectItemInteractions } from "./projectItemInteractions";
+import { createProjectMenuButton } from "./projectMenuButton";
 import { renderProjectListField as renderProjectListFieldElement } from "./projectListFieldRenderer";
 import {
   Folder as FolderIcon,
@@ -222,8 +219,6 @@ let tabNameEditSurface: "tab-bar" | "active-header" = "tab-bar";
 let fileSelectionState: FileSelectionState = initialFileSelectionState();
 let projectSortMode: ProjectSortMode = "custom";
 let projectCustomOrder: number[] = [];
-let projectPointerState: ProjectPointerState = initialProjectPointerState();
-let draggedProjectIds: number[] = [];
 let suppressProjectClick = false;
 let sidebarCollapsed = false;
 let projectSelection: MultiSelectionState = emptyMultiSelection();
@@ -381,6 +376,19 @@ const notePanelRenderer = new NotePanelRenderer({
   toggleSizeButton: toggleNotesSizeButton,
 });
 const tabBarRenderer = new TabBarRenderer(tabList);
+const projectDragController = new ProjectDragController(projectList, {
+  getState: () => ({
+    sortMode: projectSortMode,
+    inlineEditing: inlineEditState.field !== null,
+    selection: projectSelection,
+    projectIds: workspace.projects.map((project) => project.id),
+    customOrder: projectCustomOrder,
+  }),
+  setCustomOrder: (order) => { projectCustomOrder = order; },
+  setClickSuppressed: (suppressed) => { suppressProjectClick = suppressed; },
+  render,
+  persist: () => runCommand(persistProjectCustomOrder),
+});
 
 window.addEventListener("DOMContentLoaded", async () => {
   document.body.append(addTabMenu);
@@ -2306,63 +2314,7 @@ function renderProjects() {
       item.setAttribute("role", "button");
       item.setAttribute("aria-pressed", String(projectSelection.selectedIds.includes(project.id)));
       item.classList.toggle("is-custom-sort", projectSortMode === "custom");
-      item.addEventListener("pointerdown", (event) => {
-        const target = event.target as HTMLElement;
-        if (
-          projectSortMode !== "custom" ||
-          event.button !== 0 ||
-          event.ctrlKey ||
-          event.metaKey ||
-          event.shiftKey ||
-          inlineEditState.field !== null ||
-          Boolean(target.closest(".inline-editor, .project-item-menu-button"))
-        ) return;
-        draggedProjectIds = projectSelection.selectedIds.includes(project.id)
-          ? [...projectSelection.selectedIds]
-          : [project.id];
-        projectPointerState = startProjectPointerDrag(project.id, event.clientY);
-        item.setPointerCapture(event.pointerId);
-      });
-      item.addEventListener("pointermove", (event) => {
-        if (projectPointerState.projectId !== project.id) return;
-        projectPointerState = updateProjectPointerDrag(projectPointerState, event.clientY);
-        if (!projectPointerState.moved) return;
-        item.classList.add("is-dragging");
-        item.style.transform = `translateY(${projectPointerState.deltaY}px) scale(1.02)`;
-        showProjectDropIndicator(event.clientY, draggedProjectIds);
-      });
-      item.addEventListener("pointerup", async (event) => {
-        if (projectPointerState.projectId !== project.id) return;
-        item.releasePointerCapture(event.pointerId);
-        const moved = projectPointerState.moved;
-        const target = projectDropTargetAt(event.clientY, draggedProjectIds);
-        projectPointerState = initialProjectPointerState();
-        item.classList.remove("is-dragging");
-        item.style.transform = "";
-        clearProjectDropIndicators();
-        suppressProjectClick = moved;
-        if (moved) window.setTimeout(() => { suppressProjectClick = false; }, 0);
-        if (!moved || !target) return;
-        projectCustomOrder = moveProjectsInCustomOrder(
-          normalizeProjectCustomOrder(
-            projectCustomOrder,
-            workspace.projects.map((candidate) => candidate.id),
-          ),
-          draggedProjectIds,
-          target.projectId,
-          target.after,
-        );
-        draggedProjectIds = [];
-        render();
-        await runCommand(persistProjectCustomOrder);
-      });
-      item.addEventListener("pointercancel", () => {
-        projectPointerState = initialProjectPointerState();
-        draggedProjectIds = [];
-        item.classList.remove("is-dragging");
-        item.style.transform = "";
-        clearProjectDropIndicators();
-      });
+      projectDragController.bind(item, project.id);
       bindProjectItemInteractions(
         item,
         project.id,
@@ -2384,23 +2336,12 @@ function renderProjects() {
         },
       );
 
-      const menuButton = document.createElement("button");
-      menuButton.type = "button";
-      menuButton.className = "project-item-menu-button";
-      menuButton.textContent = "⋯";
-      menuButton.title = "Project actions";
-      menuButton.setAttribute("aria-label", `Actions for ${project.name}`);
-      menuButton.setAttribute("aria-haspopup", "menu");
-      menuButton.addEventListener("mousedown", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      });
-      menuButton.addEventListener("click", async (event) => {
-        event.stopPropagation();
-        const rect = menuButton.getBoundingClientRect();
-        if (!(await finishCurrentInlineEdit())) return;
-        openProjectContextMenu(project.id, rect.right, rect.bottom + 4, true);
-      });
+      const menuButton = createProjectMenuButton(
+        project.id,
+        project.name,
+        finishCurrentInlineEdit,
+        openProjectContextMenu,
+      );
 
       const selectionIndicator = document.createElement("span");
       selectionIndicator.className = "selection-indicator";
@@ -2416,35 +2357,6 @@ function renderProjects() {
       return item;
     }),
   );
-}
-
-function clearProjectDropIndicators() {
-  projectList
-    .querySelectorAll(".is-drop-before, .is-drop-after")
-    .forEach((item) => item.classList.remove("is-drop-before", "is-drop-after"));
-}
-
-function projectDropTargetAt(clientY: number, movingIds: number[]) {
-  const candidates = [...projectList.querySelectorAll<HTMLElement>(".project-item")]
-    .filter((item) => !movingIds.includes(Number(item.dataset.projectId)));
-  if (candidates.length === 0) return null;
-  for (const item of candidates) {
-    const rect = item.getBoundingClientRect();
-    if (clientY < rect.top + rect.height / 2) {
-      return { projectId: Number(item.dataset.projectId), after: false, item };
-    }
-    if (clientY <= rect.bottom) {
-      return { projectId: Number(item.dataset.projectId), after: true, item };
-    }
-  }
-  const item = candidates[candidates.length - 1];
-  return { projectId: Number(item.dataset.projectId), after: true, item };
-}
-
-function showProjectDropIndicator(clientY: number, movingIds: number[]) {
-  clearProjectDropIndicators();
-  const target = projectDropTargetAt(clientY, movingIds);
-  target?.item.classList.add(target.after ? "is-drop-after" : "is-drop-before");
 }
 
 function renderProjectListField(project: ProjectDto, field: InlineEditField) {
