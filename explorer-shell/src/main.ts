@@ -78,6 +78,7 @@ import {
 import { NotePanelRenderer } from "./notePanelRenderer";
 import { createNotesApi } from "./notesApi";
 import { createTabsApi } from "./tabsApi";
+import { createProjectsApi } from "./projectsApi";
 import {
   applyMultiSelection,
   emptyMultiSelection,
@@ -197,6 +198,7 @@ type StorageInfoDto = {
 
 const notesApi = createNotesApi<WorkspaceDto>(invoke);
 const tabsApi = createTabsApi<WorkspaceDto>(invoke);
+const projectsApi = createProjectsApi<WorkspaceDto>(invoke);
 
 let workspace: WorkspaceDto = {
   projects: [],
@@ -727,7 +729,7 @@ async function setProjectSortMode(mode: ProjectSortMode) {
   projectSortMode = mode;
   render();
   await runCommand(async () => {
-    await invoke("save_project_sort_mode", { mode });
+    await projectsApi.saveSortMode(mode);
   });
 }
 
@@ -741,7 +743,7 @@ async function createProject() {
   }
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("create_project", { name, summary });
+    workspace = await projectsApi.create(name, summary);
     const project = workspace.projects[workspace.projects.length - 1];
     projectCustomOrder = normalizeProjectCustomOrder(
       projectCustomOrder,
@@ -786,7 +788,7 @@ function startProjectInlineEdit(
 }
 
 async function persistProjectCustomOrder() {
-  await invoke("save_project_custom_order", { projectIds: projectCustomOrder });
+  await projectsApi.saveCustomOrder(projectCustomOrder);
 }
 
 async function commitProjectInlineEdit(value: string, cancel = false) {
@@ -814,11 +816,11 @@ async function commitProjectInlineEdit(value: string, cancel = false) {
   }
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("update_project", {
-      projectId: project.id,
-      name: result.field === "projectName" ? result.value : project.name,
-      summary: result.field === "projectSummary" ? result.value : project.summary,
-    });
+    workspace = await projectsApi.update(
+      project.id,
+      result.field === "projectName" ? result.value : project.name,
+      result.field === "projectSummary" ? result.value : project.summary,
+    );
     resetInlineEdit();
     render();
   });
@@ -904,7 +906,7 @@ async function confirmProjectDelete() {
   deleteProjectDialog.close();
 
   await runCommand(async () => {
-    workspace = await invoke<WorkspaceDto>("delete_projects", { projectIds });
+    workspace = await projectsApi.deleteMany(projectIds);
     activeProjectId = workspace.restored_session?.project.id ?? workspace.projects[0]?.id ?? null;
     activeTabId = workspace.restored_session?.active_tab?.id ?? activeProject()?.active_tab_id ?? null;
     projectSelection = emptyMultiSelection();
