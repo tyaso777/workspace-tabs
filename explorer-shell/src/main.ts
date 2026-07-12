@@ -11,9 +11,7 @@ import {
 } from "./fileSelection";
 import { FolderListRenderer } from "./folderListRenderer";
 import {
-  linkClickAction,
   linkDeleteConfirmation,
-  linkEditField,
   linkIdsForDelete,
   linkPreviewText,
   parseLinkLines,
@@ -22,6 +20,7 @@ import {
   toggleCheckedLink,
   type LinkInput,
 } from "./links";
+import { LinksRenderer } from "./linksRenderer";
 import { shouldRunAppUndo } from "./keyboard";
 import {
   emptyTabFolderPrompt,
@@ -226,7 +225,6 @@ let linkMenuLinkId: number | null = null;
 let tabMenuTabId: number | null = null;
 let editingLink: { id: number; field: "name" | "url" } | null = null;
 let copiedLinkId: number | null = null;
-let draggedLinkId: number | null = null;
 let linkSelectionQueue: Promise<void> = Promise.resolve();
 let pendingDeleteProjectIds: number[] = [];
 let pendingDeleteTabIds: number[] = [];
@@ -370,6 +368,7 @@ const notePanelRenderer = new NotePanelRenderer({
 });
 const tabBarRenderer = new TabBarRenderer(tabList);
 const folderListRenderer = new FolderListRenderer(fileList);
+const linksRenderer = new LinksRenderer(fileList);
 const projectDragController = new ProjectDragController(projectList, {
   getState: () => ({
     sortMode: projectSortMode,
@@ -2550,147 +2549,30 @@ function renderLinks() {
   const tab = activeTab();
   if (!tab || tab.kind !== "links") return;
   const links = linksForActiveTab();
-  const notices: HTMLElement[] = [];
-  if (errorMessage) {
-    const notice = document.createElement("p");
-    notice.className = "notice is-error";
-    notice.textContent = errorMessage;
-    notices.push(notice);
-  }
-  if (links.length === 0) {
-    const notice = document.createElement("p");
-    notice.className = "notice";
-    notice.textContent = "No links";
-    notices.push(notice);
-  }
-  fileList.replaceChildren(
-    ...notices,
-    ...links.map((link, index) => {
-      const row = document.createElement("div");
-      row.className = "link-row";
-      row.dataset.linkId = String(link.id);
-      row.tabIndex = 0;
-      row.role = "button";
-      row.draggable = true;
-      row.classList.toggle("is-current", tab.selected_link_id === link.id);
-      row.classList.toggle("is-checked", tab.checked_link_ids.includes(link.id));
-
-      const check = document.createElement("button");
-      check.type = "button";
-      check.className = `file-check ${tab.checked_link_ids.includes(link.id) ? "is-checked" : ""}`;
-      check.setAttribute("aria-label", "Check link");
-      check.addEventListener("click", (event) => {
-        event.stopPropagation();
-        const action = linkClickAction(event.ctrlKey || event.metaKey, true);
-        if (action.toggleChecked) void toggleCheckedLinkEntry(link);
-      });
-
-      const fields = document.createElement("div");
-      fields.className = "link-fields";
-      fields.append(renderLinkField(link, "name"), renderLinkField(link, "url"));
-
-      const actions = document.createElement("div");
-      actions.className = "link-actions";
-      const openButton = document.createElement("button");
-      openButton.type = "button";
-      openButton.textContent = "Open";
-      openButton.addEventListener("click", (event) => {
-        event.stopPropagation();
-        openLink(link);
-      });
-      const copyButton = document.createElement("button");
-      copyButton.type = "button";
-      copyButton.textContent = copiedLinkId === link.id ? "Copied" : "Copy";
-      copyButton.addEventListener("click", (event) => {
-        event.stopPropagation();
-        copyLinkUrl(link);
-      });
-      actions.append(openButton, copyButton);
-      row.append(check, fields, actions);
-      row.addEventListener("click", (event) => {
-        const action = linkClickAction(event.ctrlKey || event.metaKey, false);
-        if (action.toggleChecked) {
-          void toggleCheckedLinkEntry(link);
-        } else if (action.select) {
-          scheduleLinkSelection(link);
-        }
-      });
-      row.addEventListener("contextmenu", (event) => {
-        event.preventDefault();
-        openLinkContextMenu(link, event.clientX, event.clientY);
-      });
-      row.addEventListener("dragstart", (event) => {
-        if ((event.target as HTMLElement).closest("button, input")) {
-          event.preventDefault();
-          return;
-        }
-        draggedLinkId = link.id;
-        row.classList.add("is-dragging");
-        event.dataTransfer?.setData("text/plain", String(link.id));
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-      });
-      row.addEventListener("dragover", (event) => {
-        if (draggedLinkId === null || draggedLinkId === link.id) return;
-        event.preventDefault();
-        row.classList.add("is-drop-target");
-      });
-      row.addEventListener("dragleave", () => row.classList.remove("is-drop-target"));
-      row.addEventListener("drop", async (event) => {
-        event.preventDefault();
-        row.classList.remove("is-drop-target");
-        const sourceId = draggedLinkId;
-        draggedLinkId = null;
-        if (sourceId !== null && sourceId !== link.id) await moveLink(sourceId, index);
-      });
-      row.addEventListener("dragend", () => {
-        draggedLinkId = null;
-        row.classList.remove("is-dragging");
-        fileList.querySelectorAll(".is-drop-target").forEach((node) => {
-          node.classList.remove("is-drop-target");
-        });
-      });
-      row.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          selectLink(link);
-        }
-      });
-      return row;
-    }),
-  );
-}
-
-function renderLinkField(link: LinkDto, field: "name" | "url") {
-  if (editingLink?.id === link.id && editingLink.field === field) {
-    const input = document.createElement("input");
-    input.className = "link-inline-editor";
-    input.dataset.linkEditor = field;
-    input.value = link[field];
-    input.addEventListener("click", (event) => event.stopPropagation());
-    input.addEventListener("keydown", async (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        await commitLinkEdit(link, field, input.value);
-      } else if (event.key === "Escape") {
+  linksRenderer.render(
+    {
+      links,
+      selectedLinkId: tab.selected_link_id,
+      checkedLinkIds: tab.checked_link_ids,
+      editing: editingLink,
+      copiedLinkId,
+      errorMessage,
+    },
+    {
+      toggleChecked: (link) => { void toggleCheckedLinkEntry(link); },
+      select: scheduleLinkSelection,
+      open: (link) => { void openLink(link); },
+      copy: (link) => { void copyLinkUrl(link); },
+      startEdit: startLinkEdit,
+      cancelEdit: () => {
         editingLink = null;
         render();
-      }
-    });
-    input.addEventListener("blur", () => commitLinkEdit(link, field, input.value));
-    return input;
-  }
-  const value = document.createElement(field === "name" ? "strong" : "span");
-  value.className = `link-${field}`;
-  value.dataset.linkField = field;
-  value.textContent = link[field];
-  value.title = field === "name" ? "Double-click to edit name" : "Double-click to edit URL";
-  value.addEventListener("dblclick", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const editField = linkEditField((event.currentTarget as HTMLElement).dataset.linkField);
-    if (editField) startLinkEdit(link, editField);
-  });
-  return value;
+      },
+      commitEdit: (link, field, value) => { void commitLinkEdit(link, field, value); },
+      openContextMenu: openLinkContextMenu,
+      move: (linkId, targetIndex) => { void moveLink(linkId, targetIndex); },
+    },
+  );
 }
 
 async function runCommand(command: () => Promise<void>) {
