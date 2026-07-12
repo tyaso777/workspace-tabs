@@ -51,9 +51,7 @@ import {
   type ProjectPointerState,
   type ProjectSortMode,
 } from "./projectSort";
-import {
-  shouldFinishProjectEditBeforeActivation,
-} from "./projectPointer";
+import { bindProjectItemInteractions } from "./projectItemInteractions";
 import { renderProjectListField as renderProjectListFieldElement } from "./projectListFieldRenderer";
 import {
   Folder as FolderIcon,
@@ -2365,47 +2363,26 @@ function renderProjects() {
         item.style.transform = "";
         clearProjectDropIndicators();
       });
-      item.addEventListener("mousedown", async (event) => {
-        if ((event.target as HTMLElement).closest(".project-item-menu-button")) return;
-        const isInlineEditorTarget = Boolean(
-          (event.target as HTMLElement).closest(".inline-editor"),
-        );
-        if (
-          !shouldFinishProjectEditBeforeActivation(
-            inlineEditState.field !== null,
-            isInlineEditorTarget,
-          )
-        ) {
-          return;
-        }
-
-        event.preventDefault();
-        event.stopPropagation();
-        const finished = await finishCurrentInlineEdit();
-        if (finished) {
-          await selectProjectFromPointer(project.id, event);
-        }
-      });
-      item.addEventListener("click", (event) => {
-        if (suppressProjectClick) {
-          suppressProjectClick = false;
-          return;
-        }
-        if ((event.target as HTMLElement).closest(".project-item-menu-button")) return;
-        if (projectEditSurface === "project-list" && editingProjectId === project.id) return;
-        void selectProjectFromPointer(project.id, event);
-      });
-      item.addEventListener("keydown", (event) => {
-        if (event.target !== item || (event.key !== "Enter" && event.key !== " ")) return;
-        event.preventDefault();
-        activateProject(project.id);
-      });
-      item.addEventListener("contextmenu", async (event) => {
-        if ((event.target as HTMLElement).closest(".inline-editor")) return;
-        event.preventDefault();
-        if (!(await finishCurrentInlineEdit())) return;
-        openProjectContextMenu(project.id, event.clientX, event.clientY);
-      });
+      bindProjectItemInteractions(
+        item,
+        project.id,
+        {
+          hasActiveEdit: inlineEditState.field !== null,
+          editingThisItem:
+            projectEditSurface === "project-list" && editingProjectId === project.id,
+          suppressClick: () => {
+            if (!suppressProjectClick) return false;
+            suppressProjectClick = false;
+            return true;
+          },
+        },
+        {
+          finishCurrentEdit: finishCurrentInlineEdit,
+          selectFromPointer: selectProjectFromPointer,
+          activate: activateProject,
+          openContextMenu: openProjectContextMenu,
+        },
+      );
 
       const menuButton = document.createElement("button");
       menuButton.type = "button";
