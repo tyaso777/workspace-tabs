@@ -1,17 +1,15 @@
 import {
   checkFileRange,
-  fileEntryVisual,
   fileOpenAction,
-  fileRowTooltip,
   initialFileSelectionState,
   previewTargetPath,
   pruneCheckedPaths,
   pruneSelectedPath,
   selectSingleFileEntry,
-  shouldShowSelectionCheckbox,
   toggleCheckedFileEntry,
   type FileSelectionState,
 } from "./fileSelection";
+import { FolderListRenderer } from "./folderListRenderer";
 import {
   linkClickAction,
   linkDeleteConfirmation,
@@ -35,7 +33,6 @@ import {
   type InlineEditField,
   type InlineEditState,
 } from "./inlineEdit";
-import { fileNoticeForActiveTab } from "./fileNotice";
 import {
   shouldRefreshForFolderChange,
   type FolderChangedPayload,
@@ -50,11 +47,6 @@ import { ProjectDragController } from "./projectDragController";
 import { bindProjectItemInteractions } from "./projectItemInteractions";
 import { createProjectMenuButton } from "./projectMenuButton";
 import { renderProjectListField as renderProjectListFieldElement } from "./projectListFieldRenderer";
-import {
-  Folder as FolderIcon,
-  File as FileIcon,
-  createElement as createLucideElement,
-} from "lucide";
 import {
   projectDeleteConfirmationForNames,
   projectDeleteMenuLabel,
@@ -377,6 +369,7 @@ const notePanelRenderer = new NotePanelRenderer({
   toggleSizeButton: toggleNotesSizeButton,
 });
 const tabBarRenderer = new TabBarRenderer(tabList);
+const folderListRenderer = new FolderListRenderer(fileList);
 const projectDragController = new ProjectDragController(projectList, {
   getState: () => ({
     sortMode: projectSortMode,
@@ -2474,101 +2467,23 @@ function renderFiles() {
     renderLinks();
     return;
   }
-  const notices: HTMLElement[] = [];
-  if (errorMessage) {
-    const notice = document.createElement("p");
-    notice.className = "notice is-error";
-    notice.textContent = errorMessage;
-    notices.push(notice);
-  }
-
   const tab = activeTab();
-  const fileNotice = fileNoticeForActiveTab(
-    Boolean(tab),
-    tab?.kind === "folder" ? tab.folder_path : undefined,
-  );
-  if (fileNotice) {
-    const notice = document.createElement("p");
-    notice.className = "notice";
-    notice.textContent = fileNotice.text;
-    notices.push(notice);
-  }
-
-  fileList.replaceChildren(
-    ...notices,
-    ...files.map((entry) => {
-      const button = document.createElement("div");
-      button.tabIndex = 0;
-      button.role = "button";
-      button.className = entry.is_dir ? "file-row is-dir" : "file-row";
-      const isChecked = fileSelectionState.selectedPaths.includes(entry.path);
-      const isCurrent = fileSelectionState.selectedPath === entry.path;
-      const showCheckbox = shouldShowSelectionCheckbox({
-        path: entry.path,
-        isDir: entry.is_dir,
-      });
-      button.classList.toggle("is-current", isCurrent);
-      button.classList.toggle("is-checked", isChecked);
-      button.classList.toggle("has-file-check", showCheckbox);
-      const tooltipText = fileRowTooltip({ path: entry.path, isDir: entry.is_dir });
-      const visual = fileEntryVisual({ path: entry.path, isDir: entry.is_dir });
-      const check = document.createElement("button");
-      check.type = "button";
-      check.className = `file-check ${isChecked ? "is-checked" : ""}`;
-      check.setAttribute("aria-label", `Check ${entry.is_dir ? "folder" : "file"}`);
-      const kind = document.createElement("span");
-      kind.className = `file-kind is-${visual.icon}`;
-      kind.append(
-        createLucideElement(entry.is_dir ? FolderIcon : FileIcon, {
-          width: 16,
-          height: 16,
-          class: "file-kind-icon",
-          "aria-hidden": "true",
-        }),
-        document.createTextNode(visual.label),
-      );
-      const name = document.createElement("strong");
-      name.textContent = entry.name;
-      const openButton = document.createElement("button");
-      openButton.type = "button";
-      openButton.className = "file-open-button";
-      openButton.textContent = "Open";
-      button.replaceChildren(...(showCheckbox ? [check] : []), kind, name, openButton);
-      button.addEventListener("mouseenter", () => scheduleFileTooltip(button, tooltipText));
-      button.addEventListener("mouseleave", hideFileTooltip);
-      button.addEventListener("focus", () => scheduleFileTooltip(button, tooltipText));
-      button.addEventListener("blur", hideFileTooltip);
-      button.querySelector(".file-check")?.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if ((event as MouseEvent).shiftKey) {
-          void checkEntryRange(entry);
-        } else {
-          void toggleCheckedEntry(entry);
-        }
-      });
-      button.querySelector(".file-open-button")?.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openEntry(entry);
-      });
-      button.addEventListener("click", (event) => {
-        if (event.shiftKey) {
-          void checkEntryRange(entry);
-        } else if (event.ctrlKey || event.metaKey) {
-          void toggleCheckedEntry(entry);
-        } else {
-          void selectEntry(entry);
-        }
-      });
-      button.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          selectEntry(entry);
-        }
-      });
-      return button;
-    }),
+  folderListRenderer.render(
+    {
+      entries: files,
+      selection: fileSelectionState,
+      errorMessage,
+      hasActiveTab: Boolean(tab),
+      folderPath: tab?.kind === "folder" ? tab.folder_path : undefined,
+    },
+    {
+      scheduleTooltip: scheduleFileTooltip,
+      hideTooltip: hideFileTooltip,
+      toggleChecked: (entry) => { void toggleCheckedEntry(entry); },
+      checkRange: (entry) => { void checkEntryRange(entry); },
+      open: (entry) => { void openEntry(entry); },
+      select: (entry) => { void selectEntry(entry); },
+    },
   );
 }
 
