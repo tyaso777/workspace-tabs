@@ -115,7 +115,7 @@ import {
   type TabPointerState,
 } from "./tabPointer";
 import { tabWheelScroll } from "./tabWheel";
-import { tabCreationMenuOpenAfter } from "./tabCreationMenu";
+import { tabCreationMenuOpenAfter, tabCreationMenuPosition } from "./tabCreationMenu";
 import {
   tabDeleteConfirmationForTabs,
   tabDeleteMenuLabel,
@@ -266,6 +266,7 @@ let pendingDeleteLinkIds: number[] = [];
 let runtimeCloseInProgress = false;
 
 const appShell = element<HTMLElement>("#app-shell");
+const workspacePane = element<HTMLElement>(".workspace-pane");
 const localWebDisconnected = element<HTMLElement>("#local-web-disconnected");
 const localWebDisconnectedTitle = element<HTMLElement>("#local-web-disconnected-title");
 const localWebDisconnectedDetail = element<HTMLElement>("#local-web-disconnected-detail");
@@ -365,6 +366,7 @@ const closeRuntimeDialogDetail = element<HTMLElement>("#close-runtime-dialog-det
 const confirmCloseRuntimeButton = element<HTMLButtonElement>("#confirm-close-runtime-button");
 
 window.addEventListener("DOMContentLoaded", async () => {
+  document.body.append(addTabMenu);
   configureRuntimeCloseButton();
   runtimeCloseButton.addEventListener("click", requestRuntimeClose);
   confirmCloseRuntimeButton.addEventListener("click", confirmRuntimeClose);
@@ -390,6 +392,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   notesResizeHandle.addEventListener("pointercancel", finishNotesResize);
   notesResizeHandle.addEventListener("dblclick", resetNotesHeight);
   window.addEventListener("resize", applyNotePanelHeight);
+  window.addEventListener("resize", positionAddTabMenu);
   undoButton.addEventListener("click", undoLast);
   deleteProjectButton.addEventListener("click", requestActiveProjectDelete);
   sidebarToggleButton.addEventListener("click", toggleSidebar);
@@ -1111,7 +1114,21 @@ function toggleAddTabMenu() {
   const open = tabCreationMenuOpenAfter(!addTabMenu.hidden, "toggle");
   addTabMenu.hidden = !open;
   addTabButton.setAttribute("aria-expanded", String(open));
-  if (!addTabMenu.hidden) addFolderTabButton.focus();
+  if (!addTabMenu.hidden) {
+    positionAddTabMenu();
+    addFolderTabButton.focus();
+  }
+}
+
+function positionAddTabMenu() {
+  if (addTabMenu.hidden) return;
+  const button = addTabButton.getBoundingClientRect();
+  const main = workspacePane.getBoundingClientRect();
+  const menu = addTabMenu.getBoundingClientRect();
+  const position = tabCreationMenuPosition(button, main, menu.width, menu.height);
+  addTabMenu.style.left = `${position.left}px`;
+  addTabMenu.style.top = `${position.top}px`;
+  addTabMenu.dataset.placement = position.placement;
 }
 
 function closeAddTabMenu() {
