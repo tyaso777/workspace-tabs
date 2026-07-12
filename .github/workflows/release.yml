@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  build:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: explorer-shell/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            explorer-core
+            explorer-view-model
+            explorer-shell/src-tauri
+            local-web
+
+      - name: Install frontend dependencies
+        working-directory: explorer-shell
+        run: npm ci
+      - name: Build portable executables
+        shell: powershell
+        run: .\scripts\build.ps1 -Target all
+      - name: Package portable ZIP
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path outputs\data | Out-Null
+          Compress-Archive -Path outputs\workspace-tabs.exe, outputs\workspace-tabs-local-web.exe, outputs\data -DestinationPath outputs\WorkspaceTabs-portable-windows-x64.zip -Force
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorkspaceTabs-windows-x64
+          path: |
+            outputs/workspace-tabs.exe
+            outputs/workspace-tabs-local-web.exe
+            outputs/WorkspaceTabs-portable-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME outputs\workspace-tabs.exe outputs\workspace-tabs-local-web.exe outputs\WorkspaceTabs-portable-windows-x64.zip --verify-tag --generate-notes --title "WorkspaceTabs $env:GITHUB_REF_NAME"

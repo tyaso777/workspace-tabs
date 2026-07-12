@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -39,6 +40,12 @@ jobs:
       - name: Build frontend
         working-directory: explorer-shell
         run: npm run build
+      - name: Install Playwright Chromium
+        working-directory: explorer-shell
+        run: npx playwright install chromium
+      - name: Test Local Web end to end
+        working-directory: explorer-shell
+        run: npm run test:e2e
 
       - name: Test explorer-core
         run: cargo test --manifest-path explorer-core/Cargo.toml --locked
