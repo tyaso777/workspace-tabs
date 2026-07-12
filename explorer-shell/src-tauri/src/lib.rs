@@ -236,29 +236,39 @@ fn watch_folder(
     }
 
     let event_folder = next_folder.clone();
-    let mut watcher = RecommendedWatcher::new(
-        move |event: Result<notify::Event, notify::Error>| {
-            if event.is_ok() {
-                let _ = app.emit(
-                    "folder-changed",
-                    FolderChangedDto {
-                        folder_path: path_to_string(&event_folder),
-                    },
-                );
-            }
-        },
-        Config::default(),
-    )
-    .map_err(|error| error.to_string())?;
-    watcher
-        .watch(&next_folder, RecursiveMode::NonRecursive)
-        .map_err(|error| error.to_string())?;
+    let watcher = create_folder_watcher(&next_folder, move |_| {
+        let _ = app.emit(
+            "folder-changed",
+            FolderChangedDto {
+                folder_path: path_to_string(&event_folder),
+            },
+        );
+    })?;
 
     *watcher_slot = Some(FolderWatcher {
         folder_path: next_folder,
         _watcher: watcher,
     });
     Ok(())
+}
+
+fn create_folder_watcher<F>(folder: &Path, on_event: F) -> Result<RecommendedWatcher, String>
+where
+    F: Fn(notify::Event) + Send + 'static,
+{
+    let mut watcher = RecommendedWatcher::new(
+        move |result: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = result {
+                on_event(event);
+            }
+        },
+        Config::default(),
+    )
+    .map_err(|error| error.to_string())?;
+    watcher
+        .watch(folder, RecursiveMode::NonRecursive)
+        .map_err(|error| error.to_string())?;
+    Ok(watcher)
 }
 
 #[tauri::command]
@@ -1127,6 +1137,41 @@ fn open_path(path: &std::path::Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    fn unique_test_folder(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "workspace-tabs-{label}-{}-{unique}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn native_folder_watcher_reports_external_file_changes() {
+        let folder = unique_test_folder("native-watch-test");
+        std::fs::create_dir_all(&folder).unwrap();
+        let changed_file = folder.join("changed.txt");
+        let (sender, receiver) = mpsc::channel();
+        let _watcher = create_folder_watcher(&folder, move |event| {
+            let _ = sender.send(event);
+        })
+        .unwrap();
+
+        std::fs::write(&changed_file, "created outside the app").unwrap();
+        let event = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("native watcher did not report the file creation");
+
+        assert!(event.paths.iter().any(|path| path == &changed_file));
+
+        std::fs::remove_file(&changed_file).unwrap();
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
 
     #[test]
     fn uses_portable_database_when_data_folder_exists_next_to_exe() {

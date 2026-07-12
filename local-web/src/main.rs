@@ -848,24 +848,33 @@ fn watch_folder(state: &AppState, next_folder: PathBuf) -> Result<(), String> {
 
     let event_folder = next_folder.clone();
     let events = state.events.clone();
+    let watcher = create_folder_watcher(&next_folder, move |_| {
+        let _ = events.send(json!({ "folder_path": path_to_string(&event_folder) }).to_string());
+    })?;
+    *watcher_slot = Some(FolderWatcher {
+        folder_path: next_folder,
+        _watcher: watcher,
+    });
+    Ok(())
+}
+
+fn create_folder_watcher<F>(folder: &Path, on_event: F) -> Result<RecommendedWatcher, String>
+where
+    F: Fn(notify::Event) + Send + 'static,
+{
     let mut watcher = RecommendedWatcher::new(
         move |result: notify::Result<notify::Event>| {
-            if result.is_ok() {
-                let _ = events
-                    .send(json!({ "folder_path": path_to_string(&event_folder) }).to_string());
+            if let Ok(event) = result {
+                on_event(event);
             }
         },
         Config::default(),
     )
     .map_err(err)?;
     watcher
-        .watch(&next_folder, RecursiveMode::NonRecursive)
+        .watch(folder, RecursiveMode::NonRecursive)
         .map_err(err)?;
-    *watcher_slot = Some(FolderWatcher {
-        folder_path: next_folder,
-        _watcher: watcher,
-    });
-    Ok(())
+    Ok(watcher)
 }
 
 fn list_folder(folder_path: &str) -> Result<Vec<FileEntryDto>, String> {
@@ -1189,7 +1198,38 @@ async fn run() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn native_folder_watcher_reports_external_file_changes() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let folder = std::env::temp_dir().join(format!(
+            "workspace-tabs-local-web-watch-test-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&folder).unwrap();
+        let changed_file = folder.join("changed.txt");
+        let (sender, receiver) = mpsc::channel();
+        let _watcher = create_folder_watcher(&folder, move |event| {
+            let _ = sender.send(event);
+        })
+        .unwrap();
+
+        fs::write(&changed_file, "created outside the app").unwrap();
+        let event = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("native watcher did not report the file creation");
+
+        assert!(event.paths.iter().any(|path| path == &changed_file));
+
+        fs::remove_file(&changed_file).unwrap();
+        fs::remove_dir_all(&folder).unwrap();
+    }
 
     #[test]
     fn accepts_only_local_hosts_on_the_selected_port() {
