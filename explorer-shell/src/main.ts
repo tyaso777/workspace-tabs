@@ -1,5 +1,6 @@
 import {
   checkFileRange,
+  fileEntryVisual,
   fileOpenAction,
   fileRowTooltip,
   initialFileSelectionState,
@@ -56,6 +57,7 @@ import {
 } from "./projectPointer";
 import {
   Folder as FolderIcon,
+  File as FileIcon,
   Link as LinkIcon,
   Check as CheckIcon,
   createElement as createLucideElement,
@@ -2916,11 +2918,29 @@ function renderFiles() {
       button.classList.toggle("is-checked", isChecked);
       button.classList.toggle("has-file-check", showCheckbox);
       const tooltipText = fileRowTooltip({ path: entry.path, isDir: entry.is_dir });
-      button.innerHTML = `${
-        showCheckbox
-          ? `<button type="button" class="file-check ${isChecked ? "is-checked" : ""}" aria-label="Check file"></button>`
-          : ""
-      }<span>${entry.is_dir ? "DIR" : "FILE"}</span><strong>${escapeHtml(entry.name)}</strong><button type="button" class="file-open-button">Open</button>`;
+      const visual = fileEntryVisual({ path: entry.path, isDir: entry.is_dir });
+      const check = document.createElement("button");
+      check.type = "button";
+      check.className = `file-check ${isChecked ? "is-checked" : ""}`;
+      check.setAttribute("aria-label", `Check ${entry.is_dir ? "folder" : "file"}`);
+      const kind = document.createElement("span");
+      kind.className = `file-kind is-${visual.icon}`;
+      kind.append(
+        createLucideElement(entry.is_dir ? FolderIcon : FileIcon, {
+          width: 16,
+          height: 16,
+          class: "file-kind-icon",
+          "aria-hidden": "true",
+        }),
+        document.createTextNode(visual.label),
+      );
+      const name = document.createElement("strong");
+      name.textContent = entry.name;
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "file-open-button";
+      openButton.textContent = "Open";
+      button.replaceChildren(...(showCheckbox ? [check] : []), kind, name, openButton);
       button.addEventListener("mouseenter", () => scheduleFileTooltip(button, tooltipText));
       button.addEventListener("mouseleave", hideFileTooltip);
       button.addEventListener("focus", () => scheduleFileTooltip(button, tooltipText));
@@ -3223,13 +3243,4 @@ function element<T extends HTMLElement>(selector: string): T {
     throw new Error(`Missing element: ${selector}`);
   }
   return node;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
 }

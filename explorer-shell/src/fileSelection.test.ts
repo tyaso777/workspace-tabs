@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkFileRange,
   fileOpenAction,
+  fileEntryVisual,
   fileRowTooltip,
   initialFileSelectionState,
   previewTargetPath,
@@ -93,6 +94,17 @@ describe("file selection", () => {
       "openFolderExternally",
     );
     expect(fileOpenAction({ path: "C:\\work\\a.txt", isDir: false })).toBe("openFile");
+  });
+
+  it("uses one visual type for folders and one for files", () => {
+    expect(fileEntryVisual({ path: "C:\\work\\docs", isDir: true })).toEqual({
+      icon: "folder",
+      label: "DIR",
+    });
+    expect(fileEntryVisual({ path: "C:\\work\\a.txt", isDir: false })).toEqual({
+      icon: "file",
+      label: "FILE",
+    });
   });
 
   it("describes the explicit row action for hover tooltips", () => {

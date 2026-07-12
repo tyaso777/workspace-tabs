@@ -1296,6 +1296,26 @@ button.is-active {
   font-weight: 700;
 }
 
+.file-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.file-kind-icon {
+  flex: 0 0 16px;
+  stroke-width: 1.9;
+}
+
+.file-kind.is-folder .file-kind-icon {
+  color: #a06f18;
+}
+
+.file-kind.is-file .file-kind-icon {
+  color: #65717c;
+}
+
 .file-row strong {
   overflow: hidden;
   font-weight: 500;

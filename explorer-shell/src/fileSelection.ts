@@ -82,6 +82,12 @@ export function fileRowTooltip(entry: FileSelectionEntry) {
     : "Select this file or use Open";
 }
 
+export function fileEntryVisual(entry: FileSelectionEntry) {
+  return entry.isDir
+    ? { icon: "folder" as const, label: "DIR" }
+    : { icon: "file" as const, label: "FILE" };
+}
+
 export function previewTargetPath(state: FileSelectionState) {
   return state.selectedPath;
 }
