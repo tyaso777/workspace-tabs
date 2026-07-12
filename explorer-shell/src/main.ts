@@ -23,6 +23,8 @@ import {
 } from "./links";
 import { LinksRenderer } from "./linksRenderer";
 import { WorkspaceActivityRenderer } from "./workspaceActivityRenderer";
+import { WorkspaceApplicationController } from "./workspaceApplicationController";
+import { bootstrapWorkspaceApp } from "./bootstrap";
 import {
   WorkspaceViewStateController,
 } from "./workspaceViewStateController";
@@ -217,6 +219,15 @@ let pendingDeleteTabIds: number[] = [];
 let pendingDeleteLinkIds: number[] = [];
 let runtimeCloseInProgress = false;
 
+const applicationController = new WorkspaceApplicationController<WorkspaceDto>({
+  getWorkspace: () => workspace,
+  setWorkspace: (nextWorkspace) => { workspace = nextWorkspace; },
+  onError: (message) => {
+    errorMessage = message;
+    render();
+  },
+});
+
 const appShell = element<HTMLElement>("#app-shell");
 const workspacePane = element<HTMLElement>(".workspace-pane");
 const localWebDisconnected = element<HTMLElement>("#local-web-disconnected");
@@ -384,17 +395,13 @@ const projectDragController = new ProjectDragController(projectList, {
   persist: () => runCommand(persistProjectCustomOrder),
 });
 
-window.addEventListener("DOMContentLoaded", async () => {
+bootstrapWorkspaceApp({
+  initialize: async () => {
   document.body.append(addTabMenu);
   configureRuntimeCloseButton();
   runtimeCloseButton.addEventListener("click", requestRuntimeClose);
   confirmCloseRuntimeButton.addEventListener("click", confirmRuntimeClose);
   retryLocalWebButton.addEventListener("click", retryLocalWebConnection);
-  if (currentRuntime() === "local-web") {
-    window.addEventListener("pagehide", (event) => {
-      if (!event.persisted) notifyLocalWebPageClosing();
-    });
-  }
   projectForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await createProject();
@@ -507,6 +514,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   await loadProjectSortMode();
   await loadProjectCustomOrder();
   await loadWorkspace();
+  },
+  pageClosing: currentRuntime() === "local-web" ? notifyLocalWebPageClosing : undefined,
 });
 
 function setLocalWebConnectionState(state: LocalWebConnectionState) {
@@ -2414,13 +2423,8 @@ function renderLinks() {
 }
 
 async function runCommand(command: () => Promise<void>) {
-  try {
-    errorMessage = null;
-    await command();
-  } catch (error) {
-    errorMessage = String(error);
-    render();
-  }
+  errorMessage = null;
+  await applicationController.execute(command);
 }
 
 function activeProject() {
