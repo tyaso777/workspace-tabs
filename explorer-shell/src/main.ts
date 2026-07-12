@@ -421,10 +421,7 @@ const projectDragController = new ProjectDragController(projectList, {
   persist: () => runCommand(persistProjectCustomOrder),
 });
 
-bootstrapWorkspaceApp({
-  initialize: async () => {
-  document.body.append(addTabMenu);
-  configureRuntimeCloseButton();
+function registerWorkspaceEvents() {
   runtimeCloseButton.addEventListener("click", requestRuntimeClose);
   confirmCloseRuntimeButton.addEventListener("click", confirmRuntimeClose);
   retryLocalWebButton.addEventListener("click", retryLocalWebConnection);
@@ -516,20 +513,32 @@ bootstrapWorkspaceApp({
   sortCustomButton.addEventListener("click", () => setProjectSortMode("custom"));
   sortCreatedButton.addEventListener("click", () => setProjectSortMode("created"));
   sortNameButton.addEventListener("click", () => setProjectSortMode("name"));
+}
+
+async function connectWorkspaceEvents() {
   await listenFolderChanged<FolderChangedPayload>(
     (payload) => {
       scheduleFolderRefresh(payload);
     },
     setLocalWebConnectionState,
   );
+}
 
-  await loadStorageInfo();
-  await loadSidebarCollapsed();
-  await loadNotePanelState();
-  await loadProjectSortMode();
-  await loadProjectCustomOrder();
-  await loadWorkspace();
+bootstrapWorkspaceApp({
+  mount: () => {
+    document.body.append(addTabMenu);
+    configureRuntimeCloseButton();
   },
+  registerEvents: registerWorkspaceEvents,
+  connectEvents: connectWorkspaceEvents,
+  load: [
+    loadStorageInfo,
+    loadSidebarCollapsed,
+    loadNotePanelState,
+    loadProjectSortMode,
+    loadProjectCustomOrder,
+    loadWorkspace,
+  ],
   pageClosing: currentRuntime() === "local-web" ? notifyLocalWebPageClosing : undefined,
 });
 
