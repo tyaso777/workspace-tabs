@@ -770,6 +770,7 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
             workspace
                 .record_opened_file(
                     ProjectId::from_value(u64_arg(&args, "projectId")?),
+                    TabId::from_value(u64_arg(&args, "tabId")?),
                     PathBuf::from(string_arg(&args, "path")?),
                 )
                 .map_err(err)
@@ -777,10 +778,19 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
         "list_folder" => to_value(list_folder(&string_arg(&args, "folderPath")?)?),
         "open_file" => {
             let project_id = ProjectId::from_value(u64_arg(&args, "projectId")?);
+            let tab_id = TabId::from_value(u64_arg(&args, "tabId")?);
             let path = PathBuf::from(string_arg(&args, "path")?);
-            open_path(&path)?;
             mutate_workspace(state, |workspace| {
-                workspace.record_opened_file(project_id, path).map_err(err)
+                if !workspace
+                    .tabs_for_project(project_id)
+                    .map_err(err)?
+                    .iter()
+                    .any(|tab| tab.id == tab_id)
+                {
+                    return Err("Recent tab no longer exists".to_string());
+                }
+                open_path(&path)?;
+                workspace.record_opened_file(project_id, tab_id, path).map_err(err)
             })
         }
         "open_folder" => {
@@ -790,6 +800,26 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
             }
             open_path(&path)?;
             Ok(Value::Null)
+        }
+        "open_folder_item" => {
+            let project_id = ProjectId::from_value(u64_arg(&args, "projectId")?);
+            let tab_id = TabId::from_value(u64_arg(&args, "tabId")?);
+            let path = PathBuf::from(string_arg(&args, "folderPath")?);
+            if !path.is_dir() {
+                return Err(format!("not a folder: '{}'", path.display()));
+            }
+            mutate_workspace(state, |workspace| {
+                if !workspace
+                    .tabs_for_project(project_id)
+                    .map_err(err)?
+                    .iter()
+                    .any(|tab| tab.id == tab_id)
+                {
+                    return Err("Recent tab no longer exists".to_string());
+                }
+                open_path(&path)?;
+                workspace.record_opened_item(project_id, tab_id, path, true).map_err(err)
+            })
         }
         "open_url" => {
             let url = string_arg(&args, "url")?;

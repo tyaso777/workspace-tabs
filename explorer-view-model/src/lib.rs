@@ -57,7 +57,9 @@ pub struct LinkDto {
 #[derive(Debug, Clone, Serialize)]
 pub struct RecentFileDto {
     pub project_id: u64,
+    pub tab_id: u64,
     pub path: String,
+    pub is_dir: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -109,7 +111,9 @@ pub fn workspace_to_dto(workspace: &Workspace) -> WorkspaceDto {
         .recent_files()
         .map(|file| RecentFileDto {
             project_id: file.project_id.value(),
+            tab_id: file.tab_id.value(),
             path: path_to_string(&file.path),
+            is_dir: file.is_dir,
         })
         .collect();
     WorkspaceDto {

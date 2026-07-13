@@ -142,7 +142,9 @@ pub struct ProjectLink {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecentFile {
     pub project_id: ProjectId,
+    pub tab_id: TabId,
     pub path: PathBuf,
+    pub is_dir: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -936,14 +938,26 @@ impl Workspace {
     pub fn record_opened_file(
         &mut self,
         project_id: ProjectId,
+        tab_id: TabId,
         path: impl Into<PathBuf>,
     ) -> Result<(), ExplorerError> {
-        self.project(project_id)?;
+        self.record_opened_item(project_id, tab_id, path, false)
+    }
+
+    pub fn record_opened_item(
+        &mut self,
+        project_id: ProjectId,
+        tab_id: TabId,
+        path: impl Into<PathBuf>,
+        is_dir: bool,
+    ) -> Result<(), ExplorerError> {
+        self.ensure_tab_belongs_to_project(project_id, tab_id)?;
         let path = path.into();
+        self.recent_files.retain(|file| {
+            !(file.project_id == project_id && file.tab_id == tab_id && same_path(&file.path, &path))
+        });
         self.recent_files
-            .retain(|file| !(file.project_id == project_id && same_path(&file.path, &path)));
-        self.recent_files
-            .push_front(RecentFile { project_id, path });
+            .push_front(RecentFile { project_id, tab_id, path, is_dir });
         self.recent_files.truncate(self.recent_file_limit);
         self.clear_undo_history();
         Ok(())
@@ -1430,14 +1444,17 @@ mod tests {
             .create_project("Client A", "契約書とデザイン素材")
             .unwrap();
 
-        workspace
-            .record_opened_file(project_id, r"C:\work\client-a\a.xlsx")
+        let tab_id = workspace
+            .add_tab(project_id, "Files", r"C:\work\client-a")
             .unwrap();
         workspace
-            .record_opened_file(project_id, r"C:\work\client-a\b.xlsx")
+            .record_opened_file(project_id, tab_id, r"C:\work\client-a\a.xlsx")
             .unwrap();
         workspace
-            .record_opened_file(project_id, r"C:\work\client-a\a.xlsx")
+            .record_opened_file(project_id, tab_id, r"C:\work\client-a\b.xlsx")
+            .unwrap();
+        workspace
+            .record_opened_file(project_id, tab_id, r"C:\work\client-a\a.xlsx")
             .unwrap();
 
         let paths = workspace
@@ -1451,6 +1468,37 @@ mod tests {
                 PathBuf::from(r"C:\work\client-a\b.xlsx")
             ]
         );
+    }
+
+    #[test]
+    fn same_recent_path_in_different_tabs_keeps_both_contexts() {
+        let mut workspace = Workspace::new();
+        let project_id = workspace.create_project("Client A", "contracts").unwrap();
+        let first = workspace.add_tab(project_id, "First", r"C:\work").unwrap();
+        let second = workspace.add_tab(project_id, "Second", r"C:\work").unwrap();
+
+        workspace.record_opened_file(project_id, first, r"C:\work\a.txt").unwrap();
+        workspace.record_opened_file(project_id, second, r"C:\work\a.txt").unwrap();
+
+        assert_eq!(
+            workspace.recent_files().map(|file| file.tab_id).collect::<Vec<_>>(),
+            vec![second, first]
+        );
+    }
+
+    #[test]
+    fn opened_folder_is_recorded_as_a_recent_directory() {
+        let mut workspace = Workspace::new();
+        let project_id = workspace.create_project("A", "Alpha").unwrap();
+        let tab_id = workspace.add_tab(project_id, "Files", r"C:\work").unwrap();
+
+        workspace
+            .record_opened_item(project_id, tab_id, r"C:\work\assets", true)
+            .unwrap();
+
+        let recent = workspace.recent_files().next().unwrap();
+        assert!(recent.is_dir);
+        assert_eq!(recent.path, PathBuf::from(r"C:\work\assets"));
     }
 
     #[test]
@@ -1508,10 +1556,10 @@ mod tests {
             .select_path(project_b, tab_b, r"C:\work\b\src\main.rs")
             .unwrap();
         workspace
-            .record_opened_file(project_b, r"C:\work\b\src\main.rs")
+            .record_opened_file(project_b, tab_b, r"C:\work\b\src\main.rs")
             .unwrap();
         workspace
-            .record_opened_file(project_a, r"C:\work\a\notes\todo.md")
+            .record_opened_file(project_a, tab_a, r"C:\work\a\notes\todo.md")
             .unwrap();
 
         let restored = Workspace::from_snapshot(workspace.snapshot());
@@ -1746,13 +1794,13 @@ mod tests {
         let mut workspace = Workspace::new();
         let project_a = workspace.create_project("A", "Alpha").unwrap();
         let project_b = workspace.create_project("B", "Beta").unwrap();
-        workspace.add_tab(project_a, "Docs", r"C:\a\docs").unwrap();
-        workspace.add_tab(project_b, "Src", r"C:\b\src").unwrap();
+        let tab_a = workspace.add_tab(project_a, "Docs", r"C:\a\docs").unwrap();
+        let tab_b = workspace.add_tab(project_b, "Src", r"C:\b\src").unwrap();
         workspace
-            .record_opened_file(project_a, r"C:\a\docs\a.txt")
+            .record_opened_file(project_a, tab_a, r"C:\a\docs\a.txt")
             .unwrap();
         workspace
-            .record_opened_file(project_b, r"C:\b\src\b.txt")
+            .record_opened_file(project_b, tab_b, r"C:\b\src\b.txt")
             .unwrap();
         workspace.activate_project(project_a).unwrap();
 
@@ -1820,7 +1868,7 @@ mod tests {
         workspace.add_tab(project_b, "Src", r"C:\b\src").unwrap();
         workspace.activate_tab(project_a, tab_a).unwrap();
         workspace
-            .record_opened_file(project_a, r"C:\a\docs\a.txt")
+            .record_opened_file(project_a, tab_a, r"C:\a\docs\a.txt")
             .unwrap();
 
         workspace.delete_project(project_a).unwrap();

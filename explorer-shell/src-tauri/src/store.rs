@@ -176,12 +176,14 @@ impl SqliteWorkspaceStore {
 
         for (position, file) in snapshot.recent_files.iter().enumerate() {
             tx.execute(
-                "INSERT INTO recent_files (position, project_id, path)
-                 VALUES (?1, ?2, ?3)",
+                "INSERT INTO recent_files (position, project_id, tab_id, path, is_dir)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     position as i64,
                     file.project_id.value() as i64,
-                    path_to_string(&file.path)
+                    file.tab_id.value() as i64,
+                    path_to_string(&file.path),
+                    file.is_dir
                 ],
             )?;
         }
@@ -364,7 +366,9 @@ impl SqliteWorkspaceStore {
             CREATE TABLE IF NOT EXISTS recent_files (
                 position INTEGER PRIMARY KEY,
                 project_id INTEGER NOT NULL,
+                tab_id INTEGER NOT NULL,
                 path TEXT NOT NULL,
+                is_dir INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(project_id) REFERENCES projects(id)
             );
 
@@ -400,9 +404,37 @@ impl SqliteWorkspaceStore {
             );
             ",
         )?;
+        self.normalize_recent_files_table()?;
         self.normalize_legacy_tabs_table()?;
         self.create_tab_kind_triggers()?;
         self.conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        Ok(())
+    }
+
+    fn normalize_recent_files_table(&self) -> Result<(), StoreError> {
+        let columns = self.table_columns("recent_files")?;
+        if columns.iter().any(|name| name == "tab_id") {
+            if !columns.iter().any(|name| name == "is_dir") {
+                self.conn.execute(
+                    "ALTER TABLE recent_files ADD COLUMN is_dir INTEGER NOT NULL DEFAULT 0",
+                    [],
+                )?;
+            }
+            return Ok(());
+        }
+        self.conn.execute_batch(
+            "
+            DROP TABLE recent_files;
+            CREATE TABLE recent_files (
+                position INTEGER PRIMARY KEY,
+                project_id INTEGER NOT NULL,
+                tab_id INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                is_dir INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(project_id) REFERENCES projects(id)
+            );
+            ",
+        )?;
         Ok(())
     }
 
@@ -658,11 +690,13 @@ impl SqliteWorkspaceStore {
     fn load_recent_files(&self) -> Result<Vec<RecentFile>, StoreError> {
         let mut statement = self
             .conn
-            .prepare("SELECT project_id, path FROM recent_files ORDER BY position ASC")?;
+            .prepare("SELECT project_id, tab_id, path, is_dir FROM recent_files ORDER BY position ASC")?;
         let rows = statement.query_map([], |row| {
             Ok(RecentFile {
                 project_id: ProjectId::from_value(row.get::<_, i64>(0)? as u64),
-                path: PathBuf::from(row.get::<_, String>(1)?),
+                tab_id: TabId::from_value(row.get::<_, i64>(1)? as u64),
+                path: PathBuf::from(row.get::<_, String>(2)?),
+                is_dir: row.get(3)?,
             })
         })?;
         collect_rows(rows)
@@ -807,7 +841,11 @@ mod tests {
                 id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, name TEXT NOT NULL,
                 folder_path TEXT NOT NULL, selected_path TEXT, position INTEGER NOT NULL
             );
+            CREATE TABLE recent_files (
+                position INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, path TEXT NOT NULL
+            );
             INSERT INTO projects VALUES (1, 'Existing', '', 1, NULL);
+            INSERT INTO recent_files VALUES (0, 1, 'old.txt');
             INSERT INTO tabs VALUES (1, 1, 'Docs', 'C:\\docs', NULL, 0);
             ",
         )
@@ -824,6 +862,13 @@ mod tests {
         let tab_columns = store.table_columns("tabs").unwrap();
         assert!(!tab_columns.contains(&"folder_path".to_string()));
         assert!(!tab_columns.contains(&"selected_link_id".to_string()));
+        let recent_columns = store.table_columns("recent_files").unwrap();
+        assert!(recent_columns.contains(&"tab_id".to_string()));
+        let recent_count: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM recent_files", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(recent_count, 0);
     }
 
     #[test]
@@ -834,6 +879,42 @@ mod tests {
 
         assert!(workspace.projects().is_empty());
         assert!(workspace.restore_last_session().is_none());
+    }
+
+    #[test]
+    fn migration_adds_recent_item_kind_without_losing_current_recent_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE projects (
+                id INTEGER PRIMARY KEY, name TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
+                active_tab_id INTEGER, active_note_id INTEGER
+            );
+            CREATE TABLE tabs (
+                id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, name TEXT NOT NULL,
+                position INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT 'folder'
+            );
+            CREATE TABLE recent_files (
+                position INTEGER PRIMARY KEY, project_id INTEGER NOT NULL,
+                tab_id INTEGER NOT NULL, path TEXT NOT NULL
+            );
+            INSERT INTO projects VALUES (1, 'Existing', '', 1, NULL);
+            INSERT INTO tabs VALUES (1, 1, 'Docs', 0, 'folder');
+            INSERT INTO recent_files VALUES (0, 1, 1, 'C:\\docs\\memo.txt');
+            ",
+        )
+        .unwrap();
+        let store = SqliteWorkspaceStore { conn };
+
+        store.migrate().unwrap();
+
+        let row: (String, bool) = store
+            .conn
+            .query_row("SELECT path, is_dir FROM recent_files", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(row, (r"C:\docs\memo.txt".to_string(), false));
     }
 
     #[test]
@@ -873,10 +954,10 @@ mod tests {
             )
             .unwrap();
         workspace
-            .record_opened_file(project_b, r"C:\work\b\src\main.rs")
+            .record_opened_file(project_b, src_tab, r"C:\work\b\src\main.rs")
             .unwrap();
         workspace
-            .record_opened_file(project_a, r"C:\work\a\docs\memo.md")
+            .record_opened_file(project_a, docs_tab, r"C:\work\a\docs\memo.md")
             .unwrap();
 
         store.save_workspace(&workspace).unwrap();

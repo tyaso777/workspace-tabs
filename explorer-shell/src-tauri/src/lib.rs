@@ -777,11 +777,16 @@ fn update_checked_paths(
 fn record_opened_file(
     state: State<'_, AppState>,
     project_id: u64,
+    tab_id: u64,
     path: String,
 ) -> Result<WorkspaceDto, String> {
     let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
     workspace
-        .record_opened_file(ProjectId::from_value(project_id), PathBuf::from(path))
+        .record_opened_file(
+            ProjectId::from_value(project_id),
+            TabId::from_value(tab_id),
+            PathBuf::from(path),
+        )
         .map_err(|error| error.to_string())?;
     save_workspace(&state, &workspace)?;
     Ok(workspace_to_dto(&workspace))
@@ -816,14 +821,24 @@ fn list_folder(folder_path: String) -> Result<Vec<FileEntryDto>, String> {
 fn open_file(
     state: State<'_, AppState>,
     project_id: u64,
+    tab_id: u64,
     path: String,
 ) -> Result<WorkspaceDto, String> {
     let path_buf = PathBuf::from(&path);
-    open_path(&path_buf)?;
-
     let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+    let project_id = ProjectId::from_value(project_id);
+    let tab_id = TabId::from_value(tab_id);
+    if !workspace
+        .tabs_for_project(project_id)
+        .map_err(|error| error.to_string())?
+        .iter()
+        .any(|tab| tab.id == tab_id)
+    {
+        return Err("Recent tab no longer exists".to_string());
+    }
+    open_path(&path_buf)?;
     workspace
-        .record_opened_file(ProjectId::from_value(project_id), path_buf)
+        .record_opened_file(project_id, tab_id, path_buf)
         .map_err(|error| error.to_string())?;
     save_workspace(&state, &workspace)?;
     Ok(workspace_to_dto(&workspace))
@@ -836,6 +851,34 @@ fn open_folder(folder_path: String) -> Result<(), String> {
         return Err(format!("not a folder: '{}'", path.display()));
     }
     open_path(&path)
+}
+
+#[tauri::command]
+fn open_folder_item(
+    state: State<'_, AppState>,
+    project_id: u64,
+    tab_id: u64,
+    folder_path: String,
+) -> Result<WorkspaceDto, String> {
+    let path = PathBuf::from(folder_path);
+    if !path.is_dir() {
+        return Err(format!("not a folder: '{}'", path.display()));
+    }
+    let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+    let project_id = ProjectId::from_value(project_id);
+    let tab_id = TabId::from_value(tab_id);
+    workspace
+        .tabs_for_project(project_id)
+        .map_err(|error| error.to_string())?
+        .iter()
+        .find(|tab| tab.id == tab_id)
+        .ok_or_else(|| "Recent tab no longer exists".to_string())?;
+    open_path(&path)?;
+    workspace
+        .record_opened_item(project_id, tab_id, path, true)
+        .map_err(|error| error.to_string())?;
+    save_workspace(&state, &workspace)?;
+    Ok(workspace_to_dto(&workspace))
 }
 
 #[tauri::command]
@@ -942,6 +985,7 @@ pub fn run() {
             list_folder,
             open_file,
             open_folder,
+            open_folder_item,
             open_url,
             preview_file,
             load_window_width,

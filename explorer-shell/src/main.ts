@@ -23,7 +23,7 @@ import {
   type LinkInput,
 } from "./links";
 import { LinksRenderer } from "./linksRenderer";
-import { WorkspaceActivityRenderer } from "./workspaceActivityRenderer";
+import { WorkspaceActivityRenderer, type RecentFileView } from "./workspaceActivityRenderer";
 import { WorkspaceApplicationController } from "./workspaceApplicationController";
 import { bootstrapWorkspaceApp } from "./bootstrap";
 import { ActiveHeaderRenderer } from "./activeHeaderRenderer";
@@ -149,7 +149,9 @@ type LinkDto = {
 
 type RecentFileDto = {
   project_id: number;
+  tab_id: number;
   path: string;
+  is_dir: boolean;
 };
 
 type SessionDto = {
@@ -1399,14 +1401,17 @@ async function openFilesFromMenu() {
 
 async function openFolderPaths(paths: string[]) {
   const project = activeProject();
-  if (!project || paths.length === 0) return;
+  const tab = activeTab();
+  if (!project || tab?.kind !== "folder" || paths.length === 0) return;
   await runCommand(async () => {
     for (const path of paths) {
       const entry = files.find((candidate) => candidate.path === path);
       if (entry && fileOpenAction({ path, isDir: entry.is_dir }) === "openFolderExternally") {
-        await invoke("open_folder", { folderPath: path });
+        await applicationController.invoke("open_folder_item", {
+          projectId: project.id, tabId: tab.id, folderPath: path,
+        });
       } else {
-        await applicationController.invoke("open_file", { projectId: project.id, path });
+        await applicationController.invoke("open_file", { projectId: project.id, tabId: tab.id, path });
       }
     }
     render();
@@ -1414,10 +1419,14 @@ async function openFolderPaths(paths: string[]) {
 }
 
 async function openActiveFolder() {
+  const project = activeProject();
   const tab = activeTab();
-  if (tab?.kind !== "folder" || !tab.folder_path) return;
+  if (!project || tab?.kind !== "folder" || !tab.folder_path) return;
   await runCommand(async () => {
-    await invoke("open_folder", { folderPath: tab.folder_path });
+    await applicationController.invoke("open_folder_item", {
+      projectId: project.id, tabId: tab.id, folderPath: tab.folder_path,
+    });
+    render();
   });
 }
 
@@ -1788,16 +1797,52 @@ function closeNoteContextMenu() {
   contextMenus.close("note");
 }
 
-async function openRecentFile(path: string) {
-  const project = activeProject();
-  if (!project) return;
-
+async function openRecentFile(file: RecentFileView) {
   await runCommand(async () => {
-    await applicationController.invoke("open_file", {
-      projectId: project.id,
-      path,
-    });
+    if (file.isDir) {
+      await applicationController.invoke("open_folder_item", {
+        projectId: file.projectId, tabId: file.tabId, folderPath: file.path,
+      });
+    } else {
+      await applicationController.invoke("open_file", {
+        projectId: file.projectId, tabId: file.tabId, path: file.path,
+      });
+    }
     render();
+  });
+}
+
+async function activateRecentProject(file: RecentFileView) {
+  if (!workspace.projects.some((project) => project.id === file.projectId)) {
+    errorMessage = "Recent project no longer exists.";
+    render();
+    return;
+  }
+  await activateProject(file.projectId);
+}
+
+async function activateRecentTab(file: RecentFileView) {
+  const tab = workspace.tabs.find(
+    (candidate) => candidate.id === file.tabId && candidate.project_id === file.projectId,
+  );
+  if (!tab) {
+    errorMessage = "Recent tab no longer exists.";
+    render();
+    return;
+  }
+  await runCommand(async () => {
+    viewStateController.activateProject(file.projectId, file.tabId);
+    await applicationController.activateTab(file.projectId, file.tabId);
+    syncFileSelectionFromActiveTab();
+    previewText = "No preview";
+    await loadFilesForActiveTab(false);
+    const entry = files.find((candidate) => candidate.path === file.path);
+    if (!entry) {
+      errorMessage = "Recent file no longer exists.";
+      render();
+      return;
+    }
+    await selectEntry(entry);
   });
 }
 
@@ -1961,10 +2006,22 @@ function render() {
     commitTabEdit: (value, cancel) => { void commitTabInlineEdit(value, cancel); },
     chooseFolder: () => { void chooseActiveTabFolder(); },
   });
+  const recentFiles = workspace.recent_files.map((file): RecentFileView => ({
+    projectId: file.project_id,
+    projectName: workspace.projects.find((project) => project.id === file.project_id)?.name ?? "Missing Project",
+    tabId: file.tab_id,
+    tabName: workspace.tabs.find((tab) => tab.id === file.tab_id)?.name ?? "Missing Tab",
+    path: file.path,
+    isDir: file.is_dir,
+  }));
   activityRenderer.render({
     previewText,
-    recentFiles: workspace.recent_files,
-  }, (path) => { void openRecentFile(path); });
+    recentFiles,
+  }, {
+    activateProject: (file) => { void activateRecentProject(file); },
+    activateTab: (file) => { void activateRecentTab(file); },
+    open: (file) => { void openRecentFile(file); },
+  });
 
   renderProjects();
   renderNotes();
