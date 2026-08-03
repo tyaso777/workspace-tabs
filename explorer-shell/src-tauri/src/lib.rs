@@ -1,7 +1,7 @@
 mod preview;
 mod store;
 
-use explorer_core::{LinkId, NoteId, ProjectId, TabId, Workspace};
+use explorer_core::{FolderItemId, LinkId, NoteId, ProjectId, TabId, Workspace};
 use explorer_view_model::{workspace_to_dto, WorkspaceDto};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use preview::{preview_file as read_preview_file, PreviewDto};
@@ -35,6 +35,12 @@ struct FolderWatcher {
 struct LinkInput {
     name: String,
     url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FolderInput {
+    name: String,
+    path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -200,13 +206,20 @@ fn save_notes_custom_height(state: State<'_, AppState>, height: Option<u32>) -> 
 
 #[tauri::command]
 fn load_notes_maximized(state: State<'_, AppState>) -> Result<bool, String> {
-    state.store.lock().map_err(|error| error.to_string())?
-        .load_notes_maximized().map_err(|error| error.to_string())
+    state
+        .store
+        .lock()
+        .map_err(|error| error.to_string())?
+        .load_notes_maximized()
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn save_notes_maximized(state: State<'_, AppState>, maximized: bool) -> Result<(), String> {
-    state.store.lock().map_err(|error| error.to_string())?
+    state
+        .store
+        .lock()
+        .map_err(|error| error.to_string())?
         .save_notes_maximized(maximized)
         .map_err(|error| error.to_string())
 }
@@ -461,6 +474,20 @@ fn add_links_tab(
 }
 
 #[tauri::command]
+fn add_folders_tab(
+    state: State<'_, AppState>,
+    project_id: u64,
+    name: String,
+) -> Result<WorkspaceDto, String> {
+    let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+    workspace
+        .add_folders_tab(ProjectId::from_value(project_id), name)
+        .map_err(|error| error.to_string())?;
+    save_workspace(&state, &workspace)?;
+    Ok(workspace_to_dto(&workspace))
+}
+
+#[tauri::command]
 fn update_tab_name(
     state: State<'_, AppState>,
     project_id: u64,
@@ -495,6 +522,136 @@ fn add_links(
                 .into_iter()
                 .map(|link| (link.name, link.url))
                 .collect(),
+        )
+        .map_err(|error| error.to_string())?;
+    save_workspace(&state, &workspace)?;
+    Ok(workspace_to_dto(&workspace))
+}
+
+#[tauri::command]
+fn add_folders(
+    state: State<'_, AppState>,
+    project_id: u64,
+    tab_id: u64,
+    folders: Vec<FolderInput>,
+) -> Result<WorkspaceDto, String> {
+    let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+    workspace
+        .add_folders(
+            ProjectId::from_value(project_id),
+            TabId::from_value(tab_id),
+            folders
+                .into_iter()
+                .map(|folder| (folder.name, folder.path))
+                .collect(),
+        )
+        .map_err(|error| error.to_string())?;
+    save_workspace(&state, &workspace)?;
+    Ok(workspace_to_dto(&workspace))
+}
+
+#[tauri::command]
+fn update_folder_item(
+    state: State<'_, AppState>,
+    project_id: u64,
+    tab_id: u64,
+    folder_id: u64,
+    name: String,
+    path: String,
+) -> Result<WorkspaceDto, String> {
+    let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+    workspace
+        .update_folder_item(
+            ProjectId::from_value(project_id),
+            TabId::from_value(tab_id),
+            FolderItemId::from_value(folder_id),
+            name,
+            path,
+        )
+        .map_err(|error| error.to_string())?;
+    save_workspace(&state, &workspace)?;
+    Ok(workspace_to_dto(&workspace))
+}
+
+#[tauri::command]
+fn select_folder_item(
+    state: State<'_, AppState>,
+    project_id: u64,
+    tab_id: u64,
+    folder_id: Option<u64>,
+) -> Result<WorkspaceDto, String> {
+    let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+    workspace
+        .select_folder_item(
+            ProjectId::from_value(project_id),
+            TabId::from_value(tab_id),
+            folder_id.map(FolderItemId::from_value),
+        )
+        .map_err(|error| error.to_string())?;
+    save_workspace(&state, &workspace)?;
+    Ok(workspace_to_dto(&workspace))
+}
+
+#[tauri::command]
+fn update_checked_folders(
+    state: State<'_, AppState>,
+    project_id: u64,
+    tab_id: u64,
+    folder_ids: Vec<u64>,
+) -> Result<WorkspaceDto, String> {
+    let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+    workspace
+        .update_checked_folders(
+            ProjectId::from_value(project_id),
+            TabId::from_value(tab_id),
+            folder_ids
+                .into_iter()
+                .map(FolderItemId::from_value)
+                .collect(),
+        )
+        .map_err(|error| error.to_string())?;
+    save_workspace(&state, &workspace)?;
+    Ok(workspace_to_dto(&workspace))
+}
+
+#[tauri::command]
+fn delete_folders(
+    state: State<'_, AppState>,
+    project_id: u64,
+    tab_id: u64,
+    folder_ids: Vec<u64>,
+) -> Result<WorkspaceDto, String> {
+    let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+    let folder_ids = folder_ids
+        .into_iter()
+        .map(FolderItemId::from_value)
+        .collect::<Vec<_>>();
+    workspace
+        .delete_folders(
+            ProjectId::from_value(project_id),
+            TabId::from_value(tab_id),
+            &folder_ids,
+        )
+        .map_err(|error| error.to_string())?;
+    save_workspace(&state, &workspace)?;
+    Ok(workspace_to_dto(&workspace))
+}
+
+#[tauri::command]
+fn move_folder(
+    state: State<'_, AppState>,
+    project_id: u64,
+    tab_id: u64,
+    folder_id: u64,
+    target_index: usize,
+) -> Result<WorkspaceDto, String> {
+    let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+    workspace
+        .move_folder(
+            ProjectId::from_value(project_id),
+            TabId::from_value(tab_id),
+            FolderItemId::from_value(folder_id),
+            target_index,
         )
         .map_err(|error| error.to_string())?;
     save_workspace(&state, &workspace)?;
@@ -875,7 +1032,36 @@ fn open_folder_item(
         .ok_or_else(|| "Recent tab no longer exists".to_string())?;
     open_path(&path)?;
     workspace
-        .record_opened_item(project_id, tab_id, path, true)
+        .record_opened_folder(project_id, tab_id, path)
+        .map_err(|error| error.to_string())?;
+    save_workspace(&state, &workspace)?;
+    Ok(workspace_to_dto(&workspace))
+}
+
+#[tauri::command]
+fn open_folder_shortcut(
+    state: State<'_, AppState>,
+    project_id: u64,
+    tab_id: u64,
+    folder_id: u64,
+) -> Result<WorkspaceDto, String> {
+    let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+    let project_id = ProjectId::from_value(project_id);
+    let tab_id = TabId::from_value(tab_id);
+    let folder_id = FolderItemId::from_value(folder_id);
+    let folder = workspace
+        .folders_for_tab(project_id, tab_id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|folder| folder.id == folder_id)
+        .cloned()
+        .ok_or_else(|| "Folder registration no longer exists".to_string())?;
+    if !folder.path.is_dir() {
+        return Err(format!("not a folder: '{}'", folder.path.display()));
+    }
+    open_path(&folder.path)?;
+    workspace
+        .record_opened_folder_item(project_id, tab_id, folder_id, folder.name, folder.path)
         .map_err(|error| error.to_string())?;
     save_workspace(&state, &workspace)?;
     Ok(workspace_to_dto(&workspace))
@@ -890,6 +1076,37 @@ fn open_url(url: String) -> Result<(), String> {
         .spawn()
         .map_err(|error| error.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+fn open_link(
+    state: State<'_, AppState>,
+    project_id: u64,
+    tab_id: u64,
+    link_id: u64,
+    label: String,
+    url: String,
+) -> Result<WorkspaceDto, String> {
+    validate_http_url(&url)?;
+    let mut workspace = state.workspace.lock().map_err(|error| error.to_string())?;
+    let project_id = ProjectId::from_value(project_id);
+    let tab_id = TabId::from_value(tab_id);
+    workspace
+        .tabs_for_project(project_id)
+        .map_err(|error| error.to_string())?
+        .iter()
+        .find(|tab| tab.id == tab_id)
+        .ok_or_else(|| "Recent tab no longer exists".to_string())?;
+    Command::new("rundll32")
+        .arg("url.dll,FileProtocolHandler")
+        .arg(&url)
+        .spawn()
+        .map_err(|error| error.to_string())?;
+    workspace
+        .record_opened_link(project_id, tab_id, LinkId::from_value(link_id), label, url)
+        .map_err(|error| error.to_string())?;
+    save_workspace(&state, &workspace)?;
+    Ok(workspace_to_dto(&workspace))
 }
 
 #[tauri::command]
@@ -939,12 +1156,16 @@ pub fn run() {
                     apply_window_size(&window, saved_window_width, saved_window_height);
                 }
                 let window_for_event = window.clone();
+                let app_handle_for_event = app.handle().clone();
                 window.on_window_event(move |event| {
                     if matches!(
                         event,
                         WindowEvent::Resized(_) | WindowEvent::CloseRequested { .. }
                     ) {
                         save_window_size_from_window(&window_for_event);
+                    }
+                    if should_exit_after_window_event(event) {
+                        app_handle_for_event.exit(0);
                     }
                 });
             }
@@ -964,8 +1185,15 @@ pub fn run() {
             delete_notes,
             add_tab,
             add_links_tab,
+            add_folders_tab,
             update_tab_name,
             add_links,
+            add_folders,
+            update_folder_item,
+            select_folder_item,
+            update_checked_folders,
+            delete_folders,
+            move_folder,
             update_link,
             select_link,
             update_checked_links,
@@ -986,7 +1214,9 @@ pub fn run() {
             open_file,
             open_folder,
             open_folder_item,
+            open_folder_shortcut,
             open_url,
+            open_link,
             preview_file,
             load_window_width,
             load_window_height,
@@ -1007,6 +1237,10 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn should_exit_after_window_event(event: &WindowEvent) -> bool {
+    matches!(event, WindowEvent::Destroyed)
 }
 
 struct StorageLocation {
@@ -1286,6 +1520,11 @@ mod tests {
         );
         drop(first);
         std::fs::remove_dir_all(base_dir).unwrap();
+    }
+
+    #[test]
+    fn destroyed_main_window_requires_process_exit() {
+        assert!(should_exit_after_window_event(&WindowEvent::Destroyed));
     }
 
     #[test]

@@ -21,7 +21,7 @@ describe("WorkspaceApplicationController", () => {
       update: vi.fn(), deleteMany: vi.fn(), saveSortMode: vi.fn(), saveCustomOrder: vi.fn(),
     };
     const tabs = {
-      addFolder: vi.fn(), addLinks: vi.fn(), activate: vi.fn(), rename: vi.fn(),
+      addFolder: vi.fn(), addLinks: vi.fn(), addFolders: vi.fn(), activate: vi.fn(), rename: vi.fn(),
       updateFolder: vi.fn(), deleteMany: vi.fn(), moveMany: vi.fn(),
     };
     const notes = { add: vi.fn(), update: vi.fn(), activate: vi.fn(), deleteMany: vi.fn() };

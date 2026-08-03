@@ -9,6 +9,7 @@ function setup() {
     tabName: document.createElement("span"), tabKindLabel: document.createElement("span"),
     tabPath: document.createElement("div"), openFolderButton: document.createElement("button"),
     addLinkButton: document.createElement("button"), addLinksButton: document.createElement("button"),
+    addFolderButton: document.createElement("button"), addFoldersButton: document.createElement("button"),
   };
   const actions: ActiveHeaderActions = {
     startProjectEdit: vi.fn(), startTabNameEdit: vi.fn(), updateDraft: vi.fn(),
@@ -22,7 +23,7 @@ describe("ActiveHeaderRenderer DOM", () => {
     const view = setup();
     view.renderer.render({
       project: { id: 1, name: "Alpha", summary: "Summary" },
-      tab: { id: 2, name: "Files", kind: "folder", folder_path: "C:\\work" }, linksCount: 0,
+      tab: { id: 2, name: "Files", kind: "folder", folder_path: "C:\\work" }, linksCount: 0, foldersCount: 0,
       inlineEdit: { field: null, draft: "" }, projectEditSurface: "active-header", tabNameEditSurface: "tab-bar",
     }, view.actions);
     expect(view.elements.projectName.textContent).toBe("Alpha");
@@ -35,7 +36,7 @@ describe("ActiveHeaderRenderer DOM", () => {
   it("renders links controls and count", () => {
     const view = setup();
     view.renderer.render({
-      project: null, tab: { id: 3, name: "Links", kind: "links" }, linksCount: 2,
+      project: null, tab: { id: 3, name: "Links", kind: "links" }, linksCount: 2, foldersCount: 0,
       inlineEdit: { field: null, draft: "" }, projectEditSurface: "active-header", tabNameEditSurface: "tab-bar",
     }, view.actions);
     expect(view.elements.tabPath.textContent).toBe("2 links");
@@ -46,7 +47,7 @@ describe("ActiveHeaderRenderer DOM", () => {
   it("renders and commits inline editors", () => {
     const view = setup();
     view.renderer.render({
-      project: { id: 1, name: "Alpha", summary: "" }, tab: null, linksCount: 0,
+      project: { id: 1, name: "Alpha", summary: "" }, tab: null, linksCount: 0, foldersCount: 0,
       inlineEdit: { field: "projectName", draft: "Draft" },
       projectEditSurface: "active-header", tabNameEditSurface: "tab-bar",
     }, view.actions);
@@ -54,5 +55,17 @@ describe("ActiveHeaderRenderer DOM", () => {
     editor.value = "Changed";
     editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
     expect(view.actions.commitProjectEdit).toHaveBeenCalledWith("Changed");
+  });
+
+  it("renders folders controls and count", () => {
+    const view = setup();
+    view.renderer.render({
+      project: null, tab: { id: 4, name: "Folders", kind: "folders" }, linksCount: 0, foldersCount: 3,
+      inlineEdit: { field: null, draft: "" }, projectEditSurface: "active-header", tabNameEditSurface: "tab-bar",
+    }, view.actions);
+    expect(view.elements.tabPath.textContent).toBe("3 folders");
+    expect(view.elements.addFolderButton.hidden).toBe(false);
+    expect(view.elements.addFoldersButton.hidden).toBe(false);
+    expect(view.elements.openFolderButton.hidden).toBe(true);
   });
 });

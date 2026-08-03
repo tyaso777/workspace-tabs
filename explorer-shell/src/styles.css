@@ -1444,6 +1444,17 @@ button.is-active {
   gap: 8px;
 }
 
+.folder-dialog-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.folder-dialog-path-row input {
+  width: 100%;
+}
+
 .add-links-dialog label {
   color: #3f4b56;
   font-size: 0.82rem;

@@ -23,7 +23,17 @@ import {
   type LinkInput,
 } from "./links";
 import { LinksRenderer } from "./linksRenderer";
-import { WorkspaceActivityRenderer, type RecentFileView } from "./workspaceActivityRenderer";
+import {
+  folderDeleteConfirmation,
+  checkFolderRange as checkedFolderRange,
+  folderIdsForDelete,
+  parseFolderLines,
+  parseSingleFolder,
+  toggleCheckedFolder,
+  type FolderInput,
+} from "./folders";
+import { FoldersRenderer } from "./foldersRenderer";
+import { WorkspaceActivityRenderer, type RecentItemView } from "./workspaceActivityRenderer";
 import { WorkspaceApplicationController } from "./workspaceApplicationController";
 import { bootstrapWorkspaceApp } from "./bootstrap";
 import { ActiveHeaderRenderer } from "./activeHeaderRenderer";
@@ -137,7 +147,13 @@ type LinksTabDto = TabBaseDto & {
   checked_link_ids: number[];
 };
 
-type TabDto = FolderTabDto | LinksTabDto;
+type FoldersTabDto = TabBaseDto & {
+  kind: "folders";
+  selected_folder_id: number | null;
+  checked_folder_ids: number[];
+};
+
+type TabDto = FolderTabDto | LinksTabDto | FoldersTabDto;
 
 type LinkDto = {
   id: number;
@@ -147,11 +163,22 @@ type LinkDto = {
   position: number;
 };
 
-type RecentFileDto = {
+type FolderDto = {
+  id: number;
+  tab_id: number;
+  name: string;
+  path: string;
+  position: number;
+};
+
+type RecentItemDto = {
   project_id: number;
   tab_id: number;
-  path: string;
-  is_dir: boolean;
+  kind: "file" | "folder" | "link";
+  target: string;
+  label: string;
+  link_id: number | null;
+  folder_id: number | null;
 };
 
 type SessionDto = {
@@ -165,10 +192,11 @@ type WorkspaceDto = {
   tabs: TabDto[];
   notes: NoteDto[];
   links: LinkDto[];
-  recent_files: RecentFileDto[];
+  folders: FolderDto[];
+  recent_items: RecentItemDto[];
   restored_session: SessionDto | null;
   can_undo: boolean;
-  undo_kind: "delete_project" | "delete_tab" | "delete_note" | "delete_link" | null;
+  undo_kind: "delete_project" | "delete_tab" | "delete_note" | "delete_link" | "delete_folder" | null;
 };
 
 type FileEntryDto = {
@@ -199,7 +227,8 @@ let workspace: WorkspaceDto = {
   tabs: [],
   notes: [],
   links: [],
-  recent_files: [],
+  folders: [],
+  recent_items: [],
   restored_session: null,
   can_undo: false,
   undo_kind: null,
@@ -217,6 +246,10 @@ let noteInteractionQueue: Promise<void> = Promise.resolve();
 let folderRefreshTimer: number | null = null;
 let fileTooltipTimer: number | null = null;
 let copiedLinkId: number | null = null;
+let copiedFolderId: number | null = null;
+let editingFolder: { id: number; field: "name" | "path" } | null = null;
+let folderSelectionQueue: Promise<void> = Promise.resolve();
+const folderCheckAnchors = new Map<number, number>();
 let linkSelectionQueue: Promise<void> = Promise.resolve();
 let runtimeCloseInProgress = false;
 
@@ -273,9 +306,12 @@ const addTabButton = element<HTMLButtonElement>("#add-tab-button");
 const addTabMenu = element<HTMLElement>("#add-tab-menu");
 const addFolderTabButton = element<HTMLButtonElement>("#add-folder-tab-button");
 const addLinksTabButton = element<HTMLButtonElement>("#add-links-tab-button");
+const addFoldersTabButton = element<HTMLButtonElement>("#add-folders-tab-button");
 const openFolderButton = element<HTMLButtonElement>("#open-folder-button");
 const addLinkButton = element<HTMLButtonElement>("#add-link-button");
 const addLinksButton = element<HTMLButtonElement>("#add-links-button");
+const addFolderButton = element<HTMLButtonElement>("#add-folder-button");
+const addFoldersButton = element<HTMLButtonElement>("#add-folders-button");
 const activeTabName = element<HTMLElement>("#active-tab-name");
 const activeTabKindLabel = element<HTMLElement>("#active-tab-kind-label");
 const activeTabPath = element<HTMLElement>("#active-tab-path");
@@ -302,6 +338,27 @@ const deleteLinkDialog = element<HTMLDialogElement>("#delete-link-dialog");
 const deleteLinkDialogTitle = element<HTMLElement>("#delete-link-dialog-title");
 const deleteLinkDialogDetail = element<HTMLElement>("#delete-link-dialog-detail");
 const confirmDeleteLinkButton = element<HTMLButtonElement>("#confirm-delete-link-button");
+const folderContextMenu = element<HTMLElement>("#folder-context-menu");
+const editFolderNameMenuButton = element<HTMLButtonElement>("#edit-folder-name-menu-button");
+const editFolderPathMenuButton = element<HTMLButtonElement>("#edit-folder-path-menu-button");
+const chooseFolderPathMenuButton = element<HTMLButtonElement>("#choose-folder-path-menu-button");
+const openFolderShortcutMenuButton = element<HTMLButtonElement>("#open-folder-shortcut-menu-button");
+const copyFolderPathMenuButton = element<HTMLButtonElement>("#copy-folder-path-menu-button");
+const deleteFolderMenuButton = element<HTMLButtonElement>("#delete-folder-menu-button");
+const addFolderDialog = element<HTMLDialogElement>("#add-folder-dialog");
+const addFolderName = element<HTMLInputElement>("#add-folder-name");
+const addFolderPath = element<HTMLInputElement>("#add-folder-path");
+const addFolderError = element<HTMLElement>("#add-folder-error");
+const chooseAddFolderButton = element<HTMLButtonElement>("#choose-add-folder-button");
+const confirmAddFolderButton = element<HTMLButtonElement>("#confirm-add-folder-button");
+const addFoldersDialog = element<HTMLDialogElement>("#add-folders-dialog");
+const addFoldersInput = element<HTMLTextAreaElement>("#add-folders-input");
+const addFoldersError = element<HTMLElement>("#add-folders-error");
+const confirmAddFoldersButton = element<HTMLButtonElement>("#confirm-add-folders-button");
+const deleteFolderDialog = element<HTMLDialogElement>("#delete-folder-dialog");
+const deleteFolderDialogTitle = element<HTMLElement>("#delete-folder-dialog-title");
+const deleteFolderDialogDetail = element<HTMLElement>("#delete-folder-dialog-detail");
+const confirmDeleteFolderButton = element<HTMLButtonElement>("#confirm-delete-folder-button");
 const fileTooltip = element<HTMLElement>("#file-tooltip");
 const fileContextMenu = element<HTMLElement>("#file-context-menu");
 const openFileMenuButton = element<HTMLButtonElement>("#open-file-menu-button");
@@ -335,6 +392,9 @@ const dialogs = new DialogManager({
   addLink: addLinkDialog,
   addLinks: addLinksDialog,
   deleteLink: deleteLinkDialog,
+  addFolder: addFolderDialog,
+  addFolders: addFoldersDialog,
+  deleteFolder: deleteFolderDialog,
   deleteProject: deleteProjectDialog,
   deleteTab: deleteTabDialog,
   closeRuntime: closeRuntimeDialog,
@@ -345,6 +405,7 @@ const contextMenus = new ContextMenuController({
   tab: { menu: tabContextMenu, focusTarget: renameTabMenuButton },
   note: { menu: noteContextMenu, focusTarget: editNoteTitleMenuButton },
   link: { menu: linkContextMenu, focusTarget: editLinkNameMenuButton },
+  folder: { menu: folderContextMenu, focusTarget: editFolderNameMenuButton },
 });
 const fileContextMenus = new ContextMenuController<"file", string>({
   file: { menu: fileContextMenu, focusTarget: openFileMenuButton },
@@ -388,6 +449,7 @@ const notePanelRenderer = new NotePanelRenderer({
 const tabBarRenderer = new TabBarRenderer(tabList);
 const folderListRenderer = new FolderListRenderer(fileList);
 const linksRenderer = new LinksRenderer(fileList);
+const foldersRenderer = new FoldersRenderer(fileList);
 const activityRenderer = new WorkspaceActivityRenderer({
   preview: previewContent,
   recent: recentList,
@@ -401,6 +463,8 @@ const activeHeaderRenderer = new ActiveHeaderRenderer({
   openFolderButton,
   addLinkButton,
   addLinksButton,
+  addFolderButton,
+  addFoldersButton,
 });
 const projectListRenderer = new ProjectListRenderer(projectList, {
   custom: sortCustomButton,
@@ -460,6 +524,13 @@ function registerWorkspaceEvents() {
   copyLinkMenuButton.addEventListener("click", copyLinkFromMenu);
   deleteLinkMenuButton.addEventListener("click", deleteLinkFromMenu);
   confirmDeleteLinkButton.addEventListener("click", confirmLinkDelete);
+  editFolderNameMenuButton.addEventListener("click", () => editFolderFromMenu("name"));
+  editFolderPathMenuButton.addEventListener("click", () => editFolderFromMenu("path"));
+  chooseFolderPathMenuButton.addEventListener("click", chooseFolderFromMenu);
+  openFolderShortcutMenuButton.addEventListener("click", openFolderShortcutFromMenu);
+  copyFolderPathMenuButton.addEventListener("click", copyFolderPathFromMenu);
+  deleteFolderMenuButton.addEventListener("click", deleteFolderFromMenu);
+  confirmDeleteFolderButton.addEventListener("click", confirmFolderDelete);
   confirmDeleteProjectButton.addEventListener("click", confirmProjectDelete);
   confirmDeleteTabButton.addEventListener("click", confirmTabDelete);
   document.addEventListener("pointerdown", (event) => {
@@ -503,6 +574,7 @@ function registerWorkspaceEvents() {
   addTabButton.addEventListener("click", toggleAddTabMenu);
   addFolderTabButton.addEventListener("click", () => addTab("folder"));
   addLinksTabButton.addEventListener("click", () => addTab("links"));
+  addFoldersTabButton.addEventListener("click", () => addTab("folders"));
   tabList.addEventListener("wheel", handleTabWheel, { passive: false });
   activeTabPath.addEventListener("dblclick", () => {
     if (activeTab()?.kind === "folder") startTabInlineEdit("tabFolder");
@@ -512,6 +584,11 @@ function registerWorkspaceEvents() {
   addLinksButton.addEventListener("click", showAddLinksDialog);
   confirmAddLinkButton.addEventListener("click", confirmAddLink);
   confirmAddLinksButton.addEventListener("click", confirmAddLinks);
+  addFolderButton.addEventListener("click", showAddFolderDialog);
+  addFoldersButton.addEventListener("click", showAddFoldersDialog);
+  chooseAddFolderButton.addEventListener("click", chooseFolderForAddDialog);
+  confirmAddFolderButton.addEventListener("click", confirmAddFolder);
+  confirmAddFoldersButton.addEventListener("click", confirmAddFolders);
   openStorageFolderButton.addEventListener("click", openStorageFolder);
   sortCustomButton.addEventListener("click", () => setProjectSortMode("custom"));
   sortCreatedButton.addEventListener("click", () => setProjectSortMode("created"));
@@ -1123,7 +1200,7 @@ function closeAddTabMenu() {
   addTabButton.setAttribute("aria-expanded", String(open));
 }
 
-async function addTab(kind: "folder" | "links") {
+async function addTab(kind: "folder" | "links" | "folders") {
   const project = activeProject();
   if (!project) {
     errorMessage = "Select a project first.";
@@ -1133,11 +1210,13 @@ async function addTab(kind: "folder" | "links") {
   closeAddTabMenu();
 
   await runCommand(async () => {
-    const name = kind === "folder" ? DEFAULT_TAB_NAME : "New Links";
+    const name = kind === "folder" ? DEFAULT_TAB_NAME : kind === "links" ? "New Links" : "New Folders";
     if (kind === "folder") {
       await applicationController.addFolderTab(project.id, name, "");
-    } else {
+    } else if (kind === "links") {
       await applicationController.addLinksTab(project.id, name);
+    } else {
+      await applicationController.addFoldersTab(project.id, name);
     }
     const projectTabs = tabsForProject(project.id);
     viewStateController.state.activeTabId = projectTabs[projectTabs.length - 1]?.id ?? null;
@@ -1485,6 +1564,63 @@ function showAddLinksDialog() {
   addLinksInput.focus();
 }
 
+function showAddFoldersDialog() {
+  if (activeTab()?.kind !== "folders") return;
+  addFoldersInput.value = "";
+  addFoldersError.hidden = true;
+  addFoldersError.textContent = "";
+  dialogs.open("addFolders");
+  addFoldersInput.focus();
+}
+
+function showAddFolderDialog() {
+  if (activeTab()?.kind !== "folders") return;
+  addFolderName.value = "";
+  addFolderPath.value = "";
+  addFolderError.hidden = true;
+  addFolderError.textContent = "";
+  dialogs.open("addFolder");
+  addFolderName.focus();
+}
+
+async function chooseFolderForAddDialog() {
+  const selected = await chooseFolderPath(addFolderPath.value || undefined);
+  if (selected !== null) addFolderPath.value = selected;
+}
+
+async function confirmAddFolder() {
+  const folder = parseSingleFolder(addFolderName.value, addFolderPath.value);
+  if (!folder) {
+    addFolderError.textContent = "Enter or choose a folder path.";
+    addFolderError.hidden = false;
+    return;
+  }
+  await addFoldersToActiveTab([folder], "addFolder");
+}
+
+async function confirmAddFolders() {
+  const parsed = parseFolderLines(addFoldersInput.value);
+  if (parsed.invalidLines.length > 0 || parsed.folders.length === 0) {
+    addFoldersError.textContent = parsed.invalidLines.length > 0
+      ? `Invalid: ${parsed.invalidLines.join(", ")}`
+      : "Enter at least one folder path.";
+    addFoldersError.hidden = false;
+    return;
+  }
+  await addFoldersToActiveTab(parsed.folders, "addFolders");
+}
+
+async function addFoldersToActiveTab(folders: FolderInput[], dialog: "addFolder" | "addFolders") {
+  const project = activeProject();
+  const tab = activeTab();
+  if (!project || tab?.kind !== "folders") return;
+  await runCommand(async () => {
+    await applicationController.invoke("add_folders", { projectId: project.id, tabId: tab.id, folders });
+    dialogs.close(dialog);
+    render();
+  });
+}
+
 function showAddLinkDialog() {
   if (activeTab()?.kind !== "links") return;
   addLinkName.value = "";
@@ -1586,8 +1722,18 @@ async function toggleCheckedLinkEntry(link: LinkDto) {
 }
 
 async function openLink(link: LinkDto) {
+  const project = activeProject();
+  const tab = activeTab();
+  if (!project || tab?.kind !== "links") return;
   await runCommand(async () => {
-    await invoke("open_url", { url: link.url });
+    await applicationController.invoke("open_link", {
+      projectId: project.id,
+      tabId: tab.id,
+      linkId: link.id,
+      label: link.name,
+      url: link.url,
+    });
+    render();
   });
 }
 
@@ -1746,6 +1892,187 @@ async function moveLink(linkId: number, targetIndex: number) {
   });
 }
 
+function folderPreviewText(folder: FolderDto) {
+  return `${folder.name}\n${folder.path}`;
+}
+
+function selectFolderShortcut(folder: FolderDto) {
+  const project = activeProject();
+  const tab = activeTab();
+  if (!project || tab?.kind !== "folders") return Promise.resolve();
+  tab.selected_folder_id = folder.id;
+  previewText = folderPreviewText(folder);
+  render();
+  folderSelectionQueue = folderSelectionQueue.then(() => runCommand(async () => {
+    await applicationController.invoke("select_folder_item", {
+      projectId: project.id, tabId: tab.id, folderId: folder.id,
+    });
+  }));
+  return folderSelectionQueue;
+}
+
+async function toggleCheckedFolderEntry(folder: FolderDto) {
+  const project = activeProject();
+  const tab = activeTab();
+  if (!project || tab?.kind !== "folders") return;
+  const folderIds = toggleCheckedFolder(tab.checked_folder_ids, folder.id);
+  folderCheckAnchors.set(tab.id, folder.id);
+  tab.selected_folder_id = folder.id;
+  previewText = folderPreviewText(folder);
+  await runCommand(async () => {
+    await applicationController.invoke("update_checked_folders", {
+      projectId: project.id, tabId: tab.id, folderIds,
+    });
+    await applicationController.invoke("select_folder_item", {
+      projectId: project.id, tabId: tab.id, folderId: folder.id,
+    });
+    render();
+  });
+}
+
+async function checkFolderRange(folder: FolderDto) {
+  const project = activeProject(); const tab = activeTab();
+  if (!project || tab?.kind !== "folders") return;
+  const ordered = foldersForActiveTab();
+  const anchorId = folderCheckAnchors.get(tab.id) ?? tab.selected_folder_id ?? folder.id;
+  const anchorIndex = ordered.findIndex((candidate) => candidate.id === anchorId);
+  const targetIndex = ordered.findIndex((candidate) => candidate.id === folder.id);
+  if (anchorIndex < 0 || targetIndex < 0) return;
+  const folderIds = checkedFolderRange(
+    ordered.map((candidate) => candidate.id), tab.checked_folder_ids, anchorId, folder.id,
+  );
+  tab.selected_folder_id = folder.id;
+  previewText = folderPreviewText(folder);
+  await runCommand(async () => {
+    await applicationController.invoke("update_checked_folders", { projectId: project.id, tabId: tab.id, folderIds });
+    await applicationController.invoke("select_folder_item", { projectId: project.id, tabId: tab.id, folderId: folder.id });
+    render();
+  });
+}
+
+async function openFolderShortcut(folder: FolderDto) {
+  const project = activeProject();
+  const tab = activeTab();
+  if (!project || tab?.kind !== "folders") return;
+  await runCommand(async () => {
+    await applicationController.invoke("open_folder_shortcut", {
+      projectId: project.id, tabId: tab.id, folderId: folder.id,
+    });
+    render();
+  });
+}
+
+async function copyFolderPath(folder: FolderDto) {
+  try {
+    await navigator.clipboard.writeText(folder.path);
+  } catch {
+    const input = document.createElement("textarea");
+    input.value = folder.path; input.style.position = "fixed"; input.style.opacity = "0";
+    document.body.append(input); input.select(); document.execCommand("copy"); input.remove();
+  }
+  copiedFolderId = folder.id;
+  render();
+  window.setTimeout(() => { if (copiedFolderId === folder.id) { copiedFolderId = null; render(); } }, 1200);
+}
+
+function startFolderEdit(folder: FolderDto, field: "name" | "path") {
+  editingFolder = { id: folder.id, field };
+  render();
+  window.requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`[data-folder-editor="${field}"]`)?.focus());
+}
+
+async function commitFolderEdit(folder: FolderDto, field: "name" | "path", value: string) {
+  if (editingFolder?.id !== folder.id || editingFolder.field !== field) return;
+  const project = activeProject(); const tab = activeTab();
+  if (!project || tab?.kind !== "folders") return;
+  editingFolder = null;
+  await runCommand(async () => {
+    await applicationController.invoke("update_folder_item", {
+      projectId: project.id, tabId: tab.id, folderId: folder.id,
+      name: field === "name" ? value : folder.name,
+      path: field === "path" ? value : folder.path,
+    });
+    render();
+  });
+}
+
+function openFolderContextMenu(folder: FolderDto, pointerX: number, pointerY: number) {
+  const tab = activeTab();
+  const count = tab?.kind === "folders" ? folderIdsForDelete(folder.id, tab.checked_folder_ids).length : 1;
+  openFolderShortcutMenuButton.textContent = count === 1 ? "Open" : `Open ${count} Folders`;
+  deleteFolderMenuButton.textContent = count === 1 ? "Delete Folder" : `Delete ${count} Folders`;
+  contextMenus.open("folder", folder.id, pointerX, pointerY);
+}
+
+function folderFromMenu() {
+  const id = contextMenus.target("folder");
+  return workspace.folders.find((folder) => folder.id === id) ?? null;
+}
+
+function closeFolderContextMenu() { contextMenus.close("folder"); }
+
+function editFolderFromMenu(field: "name" | "path") {
+  const folder = folderFromMenu(); closeFolderContextMenu();
+  if (folder) startFolderEdit(folder, field);
+}
+
+async function chooseFolderFromMenu() {
+  const folder = folderFromMenu(); closeFolderContextMenu();
+  if (!folder) return;
+  const selected = await chooseFolderPath(folder.path);
+  if (selected === null) return;
+  editingFolder = { id: folder.id, field: "path" };
+  await commitFolderEdit(folder, "path", selected);
+}
+
+async function openFolderShortcutFromMenu() {
+  const folder = folderFromMenu(); const tab = activeTab();
+  const ids = folder && tab?.kind === "folders" ? folderIdsForDelete(folder.id, tab.checked_folder_ids) : [];
+  closeFolderContextMenu();
+  for (const candidate of foldersForActiveTab().filter((item) => ids.includes(item.id))) await openFolderShortcut(candidate);
+}
+
+async function copyFolderPathFromMenu() {
+  const folder = folderFromMenu(); closeFolderContextMenu();
+  if (folder) await copyFolderPath(folder);
+}
+
+function deleteFolderFromMenu() {
+  const folder = folderFromMenu(); const tab = activeTab(); closeFolderContextMenu();
+  if (folder && tab?.kind === "folders") requestFolderDelete(folderIdsForDelete(folder.id, tab.checked_folder_ids));
+}
+
+function requestFolderDelete(folderIds: number[]) {
+  const folders = foldersForActiveTab().filter((folder) => folderIds.includes(folder.id));
+  if (folders.length === 0) return;
+  const confirmation = folderDeleteConfirmation(folders);
+  deleteFolderDialogTitle.textContent = confirmation.title;
+  deleteFolderDialogDetail.textContent = confirmation.detail;
+  confirmDeleteFolderButton.textContent = confirmation.buttonLabel;
+  dialogs.open("deleteFolder", folders.map((folder) => folder.id));
+}
+
+async function confirmFolderDelete() {
+  const folderIds = dialogs.consumeTargets("deleteFolder");
+  if (folderIds.length === 0) return;
+  dialogs.close("deleteFolder");
+  const project = activeProject(); const tab = activeTab();
+  if (!project || tab?.kind !== "folders") return;
+  await runCommand(async () => {
+    await applicationController.invoke("delete_folders", { projectId: project.id, tabId: tab.id, folderIds });
+    previewText = "No preview"; editingFolder = null; render();
+  });
+}
+
+async function moveFolder(folderId: number, targetIndex: number) {
+  const project = activeProject(); const tab = activeTab();
+  if (!project || tab?.kind !== "folders") return;
+  await runCommand(async () => {
+    await applicationController.invoke("move_folder", { projectId: project.id, tabId: tab.id, folderId, targetIndex });
+    render();
+  });
+}
+
 async function editProjectFromMenu(action: "rename" | "description") {
   const projectId = contextMenus.target("project");
   if (projectId === null) return;
@@ -1797,22 +2124,33 @@ function closeNoteContextMenu() {
   contextMenus.close("note");
 }
 
-async function openRecentFile(file: RecentFileView) {
+async function openRecentItem(item: RecentItemView) {
   await runCommand(async () => {
-    if (file.isDir) {
-      await applicationController.invoke("open_folder_item", {
-        projectId: file.projectId, tabId: file.tabId, folderPath: file.path,
+    if (item.kind === "folder") {
+      if (item.folderId !== null && item.folderId !== undefined) {
+        await applicationController.invoke("open_folder_shortcut", {
+          projectId: item.projectId, tabId: item.tabId, folderId: item.folderId,
+        });
+      } else {
+        await applicationController.invoke("open_folder_item", {
+          projectId: item.projectId, tabId: item.tabId, folderPath: item.target,
+        });
+      }
+    } else if (item.kind === "link") {
+      await applicationController.invoke("open_link", {
+        projectId: item.projectId, tabId: item.tabId, linkId: item.linkId ?? 0,
+        label: item.label, url: item.target,
       });
     } else {
       await applicationController.invoke("open_file", {
-        projectId: file.projectId, tabId: file.tabId, path: file.path,
+        projectId: item.projectId, tabId: item.tabId, path: item.target,
       });
     }
     render();
   });
 }
 
-async function activateRecentProject(file: RecentFileView) {
+async function activateRecentProject(file: RecentItemView) {
   if (!workspace.projects.some((project) => project.id === file.projectId)) {
     errorMessage = "Recent project no longer exists.";
     render();
@@ -1821,7 +2159,7 @@ async function activateRecentProject(file: RecentFileView) {
   await activateProject(file.projectId);
 }
 
-async function activateRecentTab(file: RecentFileView) {
+async function activateRecentTab(file: RecentItemView) {
   const tab = workspace.tabs.find(
     (candidate) => candidate.id === file.tabId && candidate.project_id === file.projectId,
   );
@@ -1835,8 +2173,40 @@ async function activateRecentTab(file: RecentFileView) {
     await applicationController.activateTab(file.projectId, file.tabId);
     syncFileSelectionFromActiveTab();
     previewText = "No preview";
+    if (file.kind === "link") {
+      const link = file.linkId === null ? null : workspace.links.find(
+        (candidate) => candidate.id === file.linkId && candidate.tab_id === file.tabId,
+      );
+      if (!link) {
+        errorMessage = "Recent link no longer exists.";
+        render();
+        return;
+      }
+      await applicationController.invoke("select_link", {
+        projectId: file.projectId, tabId: file.tabId, linkId: link.id,
+      });
+      previewText = linkPreviewText(link);
+      render();
+      return;
+    }
+    if (tab.kind === "folders" && file.folderId !== null && file.folderId !== undefined) {
+      const folder = workspace.folders.find(
+        (candidate) => candidate.id === file.folderId && candidate.tab_id === file.tabId,
+      );
+      if (!folder) {
+        errorMessage = "Recent folder registration no longer exists.";
+        render();
+        return;
+      }
+      await applicationController.invoke("select_folder_item", {
+        projectId: file.projectId, tabId: file.tabId, folderId: folder.id,
+      });
+      previewText = folderPreviewText(folder);
+      render();
+      return;
+    }
     await loadFilesForActiveTab(false);
-    const entry = files.find((candidate) => candidate.path === file.path);
+    const entry = files.find((candidate) => candidate.path === file.target);
     if (!entry) {
       errorMessage = "Recent file no longer exists.";
       render();
@@ -1891,7 +2261,7 @@ async function chooseActiveTabFolder() {
 
 async function loadFilesForActiveTab(shouldRender = true) {
   const tab = activeTab();
-  if (!tab || tab.kind === "links" || !tab.folder_path) {
+  if (!tab || tab.kind !== "folder" || !tab.folder_path) {
     await updateWatchedFolder("");
     files = [];
     if (shouldRender) render();
@@ -1989,10 +2359,12 @@ function render() {
   deleteProjectButton.disabled = !project;
   addTabButton.disabled = !project;
   const activeLinks = linksForActiveTab();
+  const activeFolders = foldersForActiveTab();
   activeHeaderRenderer.render({
     project,
     tab,
     linksCount: activeLinks.length,
+    foldersCount: activeFolders.length,
     inlineEdit: viewStateController.state.inlineEdit,
     projectEditSurface: viewStateController.state.projectEditSurface,
     tabNameEditSurface: viewStateController.state.tabNameEditSurface,
@@ -2006,21 +2378,24 @@ function render() {
     commitTabEdit: (value, cancel) => { void commitTabInlineEdit(value, cancel); },
     chooseFolder: () => { void chooseActiveTabFolder(); },
   });
-  const recentFiles = workspace.recent_files.map((file): RecentFileView => ({
-    projectId: file.project_id,
-    projectName: workspace.projects.find((project) => project.id === file.project_id)?.name ?? "Missing Project",
-    tabId: file.tab_id,
-    tabName: workspace.tabs.find((tab) => tab.id === file.tab_id)?.name ?? "Missing Tab",
-    path: file.path,
-    isDir: file.is_dir,
+  const recentItems = workspace.recent_items.map((item): RecentItemView => ({
+    projectId: item.project_id,
+    projectName: workspace.projects.find((project) => project.id === item.project_id)?.name ?? "Missing Project",
+    tabId: item.tab_id,
+    tabName: workspace.tabs.find((tab) => tab.id === item.tab_id)?.name ?? "Missing Tab",
+    kind: item.kind,
+    target: item.target,
+    label: item.label,
+    linkId: item.link_id,
+    folderId: item.folder_id,
   }));
   activityRenderer.render({
     previewText,
-    recentFiles,
+    recentItems,
   }, {
     activateProject: (file) => { void activateRecentProject(file); },
     activateTab: (file) => { void activateRecentTab(file); },
-    open: (file) => { void openRecentFile(file); },
+    open: (file) => { void openRecentItem(file); },
   });
 
   renderProjects();
@@ -2034,6 +2409,7 @@ function undoTooltip(kind: WorkspaceDto["undo_kind"]) {
   if (kind === "delete_tab") return "Restore the deleted tab registration";
   if (kind === "delete_note") return "Restore the deleted note";
   if (kind === "delete_link") return "Restore the deleted link";
+  if (kind === "delete_folder") return "Restore the deleted folder registration";
   return "Nothing to undo";
 }
 
@@ -2042,6 +2418,7 @@ function undoHintText(kind: WorkspaceDto["undo_kind"]) {
   if (kind === "delete_tab") return "Deleted tab can be restored";
   if (kind === "delete_note") return "Deleted note can be restored";
   if (kind === "delete_link") return "Deleted link can be restored";
+  if (kind === "delete_folder") return "Deleted folder registration can be restored";
   return "";
 }
 
@@ -2187,6 +2564,10 @@ function renderFiles() {
     renderLinks();
     return;
   }
+  if (activeTab()?.kind === "folders") {
+    renderFolders();
+    return;
+  }
   const tab = activeTab();
   folderListRenderer.render(
     {
@@ -2206,6 +2587,30 @@ function renderFiles() {
       select: (entry) => { void selectEntry(entry); },
     },
   );
+}
+
+function renderFolders() {
+  const tab = activeTab();
+  if (!tab || tab.kind !== "folders") return;
+  foldersRenderer.render({
+    folders: foldersForActiveTab(),
+    selectedFolderId: tab.selected_folder_id,
+    checkedFolderIds: tab.checked_folder_ids,
+    editing: editingFolder,
+    copiedFolderId,
+    errorMessage,
+  }, {
+    toggleChecked: (folder) => { void toggleCheckedFolderEntry(folder); },
+    checkRange: (folder) => { void checkFolderRange(folder); },
+    select: (folder) => { void selectFolderShortcut(folder); },
+    open: (folder) => { void openFolderShortcut(folder); },
+    copy: (folder) => { void copyFolderPath(folder); },
+    startEdit: startFolderEdit,
+    cancelEdit: () => { editingFolder = null; render(); },
+    commitEdit: (folder, field, value) => { void commitFolderEdit(folder, field, value); },
+    openContextMenu: openFolderContextMenu,
+    move: (folderId, targetIndex) => { void moveFolder(folderId, targetIndex); },
+  });
 }
 
 function scheduleFileTooltip(anchor: HTMLElement, text: string) {
@@ -2304,6 +2709,13 @@ function linksForActiveTab() {
   if (viewStateController.state.activeTabId === null) return [];
   return workspace.links
     .filter((link) => link.tab_id === viewStateController.state.activeTabId)
+    .sort((left, right) => left.position - right.position);
+}
+
+function foldersForActiveTab() {
+  if (viewStateController.state.activeTabId === null) return [];
+  return workspace.folders
+    .filter((folder) => folder.tab_id === viewStateController.state.activeTabId)
     .sort((left, right) => left.position - right.position);
 }
 

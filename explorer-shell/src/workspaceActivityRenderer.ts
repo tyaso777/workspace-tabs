@@ -1,25 +1,29 @@
 import {
   File as FileIcon,
   Folder as FolderIcon,
+  Link as LinkIcon,
   createElement as createLucideElement,
 } from "lucide";
 
-export type RecentFileView = {
+export type RecentItemView = {
   projectId: number;
   projectName: string;
   tabId: number;
   tabName: string;
-  path: string;
-  isDir: boolean;
+  kind: "file" | "folder" | "link";
+  target: string;
+  label: string;
+  linkId: number | null;
+  folderId?: number | null;
 };
-export type RecentFileActions = {
-  activateProject: (file: RecentFileView) => void;
-  activateTab: (file: RecentFileView) => void;
-  open: (file: RecentFileView) => void;
+export type RecentItemActions = {
+  activateProject: (item: RecentItemView) => void;
+  activateTab: (item: RecentItemView) => void;
+  open: (item: RecentItemView) => void;
 };
 export type WorkspaceActivityState = {
   previewText: string;
-  recentFiles: RecentFileView[];
+  recentItems: RecentItemView[];
 };
 
 export class WorkspaceActivityRenderer {
@@ -28,20 +32,20 @@ export class WorkspaceActivityRenderer {
     recent: HTMLElement;
   }) {}
 
-  render(state: WorkspaceActivityState, actions: RecentFileActions): void {
+  render(state: WorkspaceActivityState, actions: RecentItemActions): void {
     this.elements.preview.textContent = state.previewText;
-    this.#renderRecent(state.recentFiles, actions);
+    this.#renderRecent(state.recentItems, actions);
   }
 
-  #renderRecent(files: RecentFileView[], actions: RecentFileActions): void {
-    if (files.length === 0) {
+  #renderRecent(items: RecentItemView[], actions: RecentItemActions): void {
+    if (items.length === 0) {
       const notice = document.createElement("p");
       notice.className = "notice";
       notice.textContent = "None yet.";
       this.elements.recent.replaceChildren(notice);
       return;
     }
-    this.elements.recent.replaceChildren(...files.map((file) => {
+    this.elements.recent.replaceChildren(...items.map((file) => {
       const item = document.createElement("div");
       item.className = "recent-item";
       const projectButton = document.createElement("button");
@@ -58,20 +62,19 @@ export class WorkspaceActivityRenderer {
       tabButton.addEventListener("click", () => actions.activateTab(file));
       const path = document.createElement("span");
       path.className = "recent-path";
-      path.textContent = file.path;
+      path.textContent = file.target;
       const fileName = document.createElement("span");
       fileName.className = "recent-file-name";
-      const pathParts = file.path.split(/[\\/]/).filter(Boolean);
       fileName.append(
-        createLucideElement(file.isDir ? FolderIcon : FileIcon, {
+        createLucideElement(file.kind === "folder" ? FolderIcon : file.kind === "link" ? LinkIcon : FileIcon, {
           width: 15, height: 15, "aria-hidden": "true",
         }),
-        document.createTextNode(pathParts[pathParts.length - 1] ?? file.path),
+        document.createTextNode(file.label),
       );
       const openButton = document.createElement("button");
       openButton.type = "button";
       openButton.textContent = "Open";
-      openButton.dataset.tooltip = file.isDir ? "Open this folder" : "Open this file";
+      openButton.dataset.tooltip = file.kind === "folder" ? "Open this folder" : file.kind === "link" ? "Open this link" : "Open this file";
       openButton.addEventListener("click", () => actions.open(file));
       item.append(
         this.#label("Project"), projectButton,

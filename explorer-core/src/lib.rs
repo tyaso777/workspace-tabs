@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ProjectId(u64);
@@ -54,9 +54,22 @@ impl LinkId {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FolderItemId(u64);
+
+impl FolderItemId {
+    pub fn from_value(value: u64) -> Self {
+        Self(value)
+    }
+    pub fn value(self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TabKind {
     Folder,
+    Folders,
     Links,
 }
 
@@ -91,6 +104,7 @@ pub struct ProjectTab {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TabContent {
     Folder(FolderTabState),
+    Folders(FoldersTabState),
     Links(LinksTabState),
 }
 
@@ -107,10 +121,17 @@ pub struct LinksTabState {
     pub checked_link_ids: Vec<LinkId>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FoldersTabState {
+    pub selected_folder_id: Option<FolderItemId>,
+    pub checked_folder_ids: Vec<FolderItemId>,
+}
+
 impl ProjectTab {
     pub fn kind(&self) -> TabKind {
         match self.content {
             TabContent::Folder(_) => TabKind::Folder,
+            TabContent::Folders(_) => TabKind::Folders,
             TabContent::Links(_) => TabKind::Links,
         }
     }
@@ -118,14 +139,21 @@ impl ProjectTab {
     pub fn folder(&self) -> Option<&FolderTabState> {
         match &self.content {
             TabContent::Folder(state) => Some(state),
-            TabContent::Links(_) => None,
+            TabContent::Folders(_) | TabContent::Links(_) => None,
         }
     }
 
     pub fn links(&self) -> Option<&LinksTabState> {
         match &self.content {
-            TabContent::Folder(_) => None,
+            TabContent::Folder(_) | TabContent::Folders(_) => None,
             TabContent::Links(state) => Some(state),
+        }
+    }
+
+    pub fn folders(&self) -> Option<&FoldersTabState> {
+        match &self.content {
+            TabContent::Folders(state) => Some(state),
+            TabContent::Folder(_) | TabContent::Links(_) => None,
         }
     }
 }
@@ -140,11 +168,30 @@ pub struct ProjectLink {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecentFile {
+pub struct ProjectFolder {
+    pub id: FolderItemId,
+    pub tab_id: TabId,
+    pub name: String,
+    pub path: PathBuf,
+    pub position: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecentItemKind {
+    File,
+    Folder,
+    Link,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentItem {
     pub project_id: ProjectId,
     pub tab_id: TabId,
-    pub path: PathBuf,
-    pub is_dir: bool,
+    pub kind: RecentItemKind,
+    pub target: String,
+    pub label: String,
+    pub link_id: Option<LinkId>,
+    pub folder_id: Option<FolderItemId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,7 +207,8 @@ pub struct WorkspaceSnapshot {
     pub tabs: Vec<ProjectTab>,
     pub notes: Vec<ProjectNote>,
     pub links: Vec<ProjectLink>,
-    pub recent_files: Vec<RecentFile>,
+    pub folders: Vec<ProjectFolder>,
+    pub recent_items: Vec<RecentItem>,
     pub active_project_id: Option<ProjectId>,
 }
 
@@ -170,6 +218,7 @@ pub enum UndoKind {
     DeleteTab,
     DeleteNote,
     DeleteLink,
+    DeleteFolder,
 }
 
 #[derive(Debug, Clone)]
@@ -184,10 +233,12 @@ pub enum ExplorerError {
     EmptyTabName,
     EmptyNoteTitle,
     InvalidLinkUrl,
+    InvalidFolderPath,
     ProjectNotFound(ProjectId),
     TabNotFound(TabId),
     NoteNotFound(NoteId),
     LinkNotFound(LinkId),
+    FolderItemNotFound(FolderItemId),
     WrongTabKind {
         tab_id: TabId,
         expected: TabKind,
@@ -209,12 +260,16 @@ impl fmt::Display for ExplorerError {
             ExplorerError::EmptyTabName => write!(f, "tab name must not be empty"),
             ExplorerError::EmptyNoteTitle => write!(f, "note title must not be empty"),
             ExplorerError::InvalidLinkUrl => write!(f, "URL must start with http:// or https://"),
+            ExplorerError::InvalidFolderPath => write!(f, "folder path must not be empty"),
             ExplorerError::ProjectNotFound(id) => {
                 write!(f, "project not found: {}", id.value())
             }
             ExplorerError::TabNotFound(id) => write!(f, "tab not found: {}", id.value()),
             ExplorerError::NoteNotFound(id) => write!(f, "note not found: {}", id.value()),
             ExplorerError::LinkNotFound(id) => write!(f, "link not found: {}", id.value()),
+            ExplorerError::FolderItemNotFound(id) => {
+                write!(f, "folder item not found: {}", id.value())
+            }
             ExplorerError::WrongTabKind { tab_id, expected } => {
                 write!(f, "tab {} is not a {:?} tab", tab_id.value(), expected)
             }
@@ -245,12 +300,14 @@ pub struct Workspace {
     tabs: Vec<ProjectTab>,
     notes: Vec<ProjectNote>,
     links: Vec<ProjectLink>,
-    recent_files: VecDeque<RecentFile>,
+    folders: Vec<ProjectFolder>,
+    recent_items: VecDeque<RecentItem>,
     undo_entries: Vec<UndoEntry>,
     next_project_id: u64,
     next_tab_id: u64,
     next_note_id: u64,
     next_link_id: u64,
+    next_folder_item_id: u64,
     active_project_id: Option<ProjectId>,
     recent_file_limit: usize,
 }
@@ -268,12 +325,14 @@ impl Workspace {
             tabs: Vec::new(),
             notes: Vec::new(),
             links: Vec::new(),
-            recent_files: VecDeque::new(),
+            folders: Vec::new(),
+            recent_items: VecDeque::new(),
             undo_entries: Vec::new(),
             next_project_id: 1,
             next_tab_id: 1,
             next_note_id: 1,
             next_link_id: 1,
+            next_folder_item_id: 1,
             active_project_id: None,
             recent_file_limit: 30,
         }
@@ -308,21 +367,30 @@ impl Workspace {
             .max()
             .unwrap_or(0)
             + 1;
+        let next_folder_item_id = snapshot
+            .folders
+            .iter()
+            .map(|folder| folder.id.value())
+            .max()
+            .unwrap_or(0)
+            + 1;
         let recent_file_limit = 30;
-        let mut recent_files = VecDeque::from(snapshot.recent_files);
-        recent_files.truncate(recent_file_limit);
+        let mut recent_items = VecDeque::from(snapshot.recent_items);
+        recent_items.truncate(recent_file_limit);
 
         Self {
             projects: snapshot.projects,
             tabs: snapshot.tabs,
             notes: snapshot.notes,
             links: snapshot.links,
-            recent_files,
+            folders: snapshot.folders,
+            recent_items,
             undo_entries: Vec::new(),
             next_project_id,
             next_tab_id,
             next_note_id,
             next_link_id,
+            next_folder_item_id,
             active_project_id: snapshot.active_project_id,
             recent_file_limit,
         }
@@ -334,7 +402,8 @@ impl Workspace {
             tabs: self.tabs.clone(),
             notes: self.notes.clone(),
             links: self.links.clone(),
-            recent_files: self.recent_files.iter().cloned().collect(),
+            folders: self.folders.clone(),
+            recent_items: self.recent_items.iter().cloned().collect(),
             active_project_id: self.active_project_id,
         }
     }
@@ -508,8 +577,10 @@ impl Workspace {
             .retain(|note| !project_ids.contains(&note.project_id));
         self.links
             .retain(|link| !deleted_tab_ids.contains(&link.tab_id));
-        self.recent_files
-            .retain(|file| !project_ids.contains(&file.project_id));
+        self.folders
+            .retain(|folder| !deleted_tab_ids.contains(&folder.tab_id));
+        self.recent_items
+            .retain(|item| !project_ids.contains(&item.project_id));
 
         if self
             .active_project_id
@@ -583,6 +654,187 @@ impl Workspace {
         }
         self.clear_undo_history();
         Ok(id)
+    }
+
+    pub fn add_folders_tab(
+        &mut self,
+        project_id: ProjectId,
+        name: impl Into<String>,
+    ) -> Result<TabId, ExplorerError> {
+        let name = trim_required(name.into()).ok_or(ExplorerError::EmptyTabName)?;
+        let position = self.project(project_id)?.tab_ids.len();
+        let id = TabId(self.next_tab_id);
+        self.next_tab_id += 1;
+        self.tabs.push(ProjectTab {
+            id,
+            project_id,
+            name,
+            content: TabContent::Folders(FoldersTabState {
+                selected_folder_id: None,
+                checked_folder_ids: Vec::new(),
+            }),
+            position,
+        });
+        let project = self.project_mut(project_id)?;
+        project.tab_ids.push(id);
+        if project.active_tab_id.is_none() {
+            project.active_tab_id = Some(id);
+        }
+        self.clear_undo_history();
+        Ok(id)
+    }
+
+    pub fn add_folders(
+        &mut self,
+        project_id: ProjectId,
+        tab_id: TabId,
+        values: Vec<(String, String)>,
+    ) -> Result<Vec<FolderItemId>, ExplorerError> {
+        self.ensure_folders_tab(project_id, tab_id)?;
+        let normalized = values
+            .into_iter()
+            .map(|(name, path)| normalize_folder(name, path))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut ids = Vec::with_capacity(normalized.len());
+        let mut position = self
+            .folders
+            .iter()
+            .filter(|folder| folder.tab_id == tab_id)
+            .count();
+        for (name, path) in normalized {
+            let id = FolderItemId(self.next_folder_item_id);
+            self.next_folder_item_id += 1;
+            self.folders.push(ProjectFolder {
+                id,
+                tab_id,
+                name,
+                path,
+                position,
+            });
+            ids.push(id);
+            position += 1;
+        }
+        self.clear_undo_history();
+        Ok(ids)
+    }
+
+    pub fn update_folder_item(
+        &mut self,
+        project_id: ProjectId,
+        tab_id: TabId,
+        folder_id: FolderItemId,
+        name: impl Into<String>,
+        path: impl Into<String>,
+    ) -> Result<(), ExplorerError> {
+        self.ensure_folders_tab(project_id, tab_id)?;
+        let (name, path) = normalize_folder(name.into(), path.into())?;
+        let folder = self
+            .folders
+            .iter_mut()
+            .find(|folder| folder.id == folder_id && folder.tab_id == tab_id)
+            .ok_or(ExplorerError::FolderItemNotFound(folder_id))?;
+        folder.name = name;
+        folder.path = path;
+        self.clear_undo_history();
+        Ok(())
+    }
+
+    pub fn select_folder_item(
+        &mut self,
+        project_id: ProjectId,
+        tab_id: TabId,
+        folder_id: Option<FolderItemId>,
+    ) -> Result<(), ExplorerError> {
+        self.ensure_folders_tab(project_id, tab_id)?;
+        if let Some(id) = folder_id {
+            self.ensure_folder_belongs_to_tab(tab_id, id)?;
+        }
+        self.folders_tab_mut(tab_id)?.selected_folder_id = folder_id;
+        self.clear_undo_history();
+        Ok(())
+    }
+
+    pub fn update_checked_folders(
+        &mut self,
+        project_id: ProjectId,
+        tab_id: TabId,
+        folder_ids: Vec<FolderItemId>,
+    ) -> Result<(), ExplorerError> {
+        self.ensure_folders_tab(project_id, tab_id)?;
+        for id in &folder_ids {
+            self.ensure_folder_belongs_to_tab(tab_id, *id)?;
+        }
+        self.folders_tab_mut(tab_id)?.checked_folder_ids = folder_ids;
+        self.clear_undo_history();
+        Ok(())
+    }
+
+    pub fn delete_folders(
+        &mut self,
+        project_id: ProjectId,
+        tab_id: TabId,
+        folder_ids: &[FolderItemId],
+    ) -> Result<(), ExplorerError> {
+        if folder_ids.is_empty() {
+            return Ok(());
+        }
+        self.ensure_folders_tab(project_id, tab_id)?;
+        for id in folder_ids {
+            self.ensure_folder_belongs_to_tab(tab_id, *id)?;
+        }
+        self.push_undo_snapshot(UndoKind::DeleteFolder);
+        self.folders
+            .retain(|folder| !folder_ids.contains(&folder.id));
+        for (position, folder) in self
+            .folders
+            .iter_mut()
+            .filter(|folder| folder.tab_id == tab_id)
+            .enumerate()
+        {
+            folder.position = position;
+        }
+        let tab = self.folders_tab_mut(tab_id)?;
+        if tab
+            .selected_folder_id
+            .is_some_and(|id| folder_ids.contains(&id))
+        {
+            tab.selected_folder_id = None;
+        }
+        tab.checked_folder_ids.retain(|id| !folder_ids.contains(id));
+        Ok(())
+    }
+
+    pub fn move_folder(
+        &mut self,
+        project_id: ProjectId,
+        tab_id: TabId,
+        folder_id: FolderItemId,
+        target_index: usize,
+    ) -> Result<(), ExplorerError> {
+        self.ensure_folders_tab(project_id, tab_id)?;
+        self.ensure_folder_belongs_to_tab(tab_id, folder_id)?;
+        let mut ids = self
+            .folders
+            .iter()
+            .filter(|folder| folder.tab_id == tab_id)
+            .map(|folder| (folder.position, folder.id))
+            .collect::<Vec<_>>();
+        ids.sort_by_key(|(position, _)| *position);
+        let mut ids = ids.into_iter().map(|(_, id)| id).collect::<Vec<_>>();
+        let source = ids
+            .iter()
+            .position(|id| *id == folder_id)
+            .ok_or(ExplorerError::FolderItemNotFound(folder_id))?;
+        let id = ids.remove(source);
+        let target = target_index.min(ids.len());
+        ids.insert(target, id);
+        for (position, id) in ids.into_iter().enumerate() {
+            if let Some(folder) = self.folders.iter_mut().find(|folder| folder.id == id) {
+                folder.position = position;
+            }
+        }
+        self.clear_undo_history();
+        Ok(())
     }
 
     pub fn update_tab_name(
@@ -808,7 +1060,10 @@ impl Workspace {
         project_id: ProjectId,
         tab_ids: &[TabId],
     ) -> Result<(), ExplorerError> {
-        let tab_ids = tab_ids.iter().copied().collect::<std::collections::HashSet<_>>();
+        let tab_ids = tab_ids
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
         for tab_id in &tab_ids {
             self.ensure_tab_belongs_to_project(project_id, *tab_id)?;
         }
@@ -817,6 +1072,8 @@ impl Workspace {
         }
         self.push_undo_snapshot(UndoKind::DeleteTab);
         self.links.retain(|link| !tab_ids.contains(&link.tab_id));
+        self.folders
+            .retain(|folder| !tab_ids.contains(&folder.tab_id));
         self.tabs.retain(|tab| !tab_ids.contains(&tab.id));
 
         let remaining_tabs = self
@@ -836,7 +1093,10 @@ impl Workspace {
             .map(|tab| tab.id);
         let project = self.project_mut(project_id)?;
         project.tab_ids.retain(|id| !tab_ids.contains(id));
-        if project.active_tab_id.is_some_and(|id| tab_ids.contains(&id)) {
+        if project
+            .active_tab_id
+            .is_some_and(|id| tab_ids.contains(&id))
+        {
             project.active_tab_id = replacement_active_tab;
         }
 
@@ -858,7 +1118,10 @@ impl Workspace {
         tab_ids: &[TabId],
         target_index: usize,
     ) -> Result<(), ExplorerError> {
-        let selected = tab_ids.iter().copied().collect::<std::collections::HashSet<_>>();
+        let selected = tab_ids
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
         for tab_id in &selected {
             self.ensure_tab_belongs_to_project(project_id, *tab_id)?;
         }
@@ -941,24 +1204,108 @@ impl Workspace {
         tab_id: TabId,
         path: impl Into<PathBuf>,
     ) -> Result<(), ExplorerError> {
-        self.record_opened_item(project_id, tab_id, path, false)
+        let path = path.into();
+        self.record_recent_item(
+            project_id,
+            tab_id,
+            RecentItemKind::File,
+            path.to_string_lossy().into_owned(),
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+            None,
+            None,
+        )
     }
 
-    pub fn record_opened_item(
+    pub fn record_opened_folder(
         &mut self,
         project_id: ProjectId,
         tab_id: TabId,
         path: impl Into<PathBuf>,
-        is_dir: bool,
+    ) -> Result<(), ExplorerError> {
+        let path = path.into();
+        self.record_recent_item(
+            project_id,
+            tab_id,
+            RecentItemKind::Folder,
+            path.to_string_lossy().into_owned(),
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_string_lossy().into_owned()),
+            None,
+            None,
+        )
+    }
+
+    pub fn record_opened_link(
+        &mut self,
+        project_id: ProjectId,
+        tab_id: TabId,
+        link_id: LinkId,
+        label: impl Into<String>,
+        url: impl Into<String>,
+    ) -> Result<(), ExplorerError> {
+        self.record_recent_item(
+            project_id,
+            tab_id,
+            RecentItemKind::Link,
+            url.into(),
+            label.into(),
+            Some(link_id),
+            None,
+        )
+    }
+
+    pub fn record_opened_folder_item(
+        &mut self,
+        project_id: ProjectId,
+        tab_id: TabId,
+        folder_id: FolderItemId,
+        label: impl Into<String>,
+        path: impl Into<PathBuf>,
     ) -> Result<(), ExplorerError> {
         self.ensure_tab_belongs_to_project(project_id, tab_id)?;
+        self.ensure_folder_belongs_to_tab(tab_id, folder_id)?;
         let path = path.into();
-        self.recent_files.retain(|file| {
-            !(file.project_id == project_id && file.tab_id == tab_id && same_path(&file.path, &path))
+        self.record_recent_item(
+            project_id,
+            tab_id,
+            RecentItemKind::Folder,
+            path.to_string_lossy().into_owned(),
+            label.into(),
+            None,
+            Some(folder_id),
+        )
+    }
+
+    fn record_recent_item(
+        &mut self,
+        project_id: ProjectId,
+        tab_id: TabId,
+        kind: RecentItemKind,
+        target: String,
+        label: String,
+        link_id: Option<LinkId>,
+        folder_id: Option<FolderItemId>,
+    ) -> Result<(), ExplorerError> {
+        self.ensure_tab_belongs_to_project(project_id, tab_id)?;
+        self.recent_items.retain(|item| {
+            !(item.project_id == project_id
+                && item.tab_id == tab_id
+                && item.kind == kind
+                && item.target.eq_ignore_ascii_case(&target))
         });
-        self.recent_files
-            .push_front(RecentFile { project_id, tab_id, path, is_dir });
-        self.recent_files.truncate(self.recent_file_limit);
+        self.recent_items.push_front(RecentItem {
+            project_id,
+            tab_id,
+            kind,
+            target,
+            label,
+            link_id,
+            folder_id,
+        });
+        self.recent_items.truncate(self.recent_file_limit);
         self.clear_undo_history();
         Ok(())
     }
@@ -1044,8 +1391,27 @@ impl Workspace {
         Ok(links)
     }
 
-    pub fn recent_files(&self) -> impl Iterator<Item = &RecentFile> {
-        self.recent_files.iter()
+    pub fn folders_for_tab(
+        &self,
+        project_id: ProjectId,
+        tab_id: TabId,
+    ) -> Result<Vec<&ProjectFolder>, ExplorerError> {
+        self.ensure_folders_tab(project_id, tab_id)?;
+        let mut folders = self
+            .folders
+            .iter()
+            .filter(|folder| folder.tab_id == tab_id)
+            .collect::<Vec<_>>();
+        folders.sort_by_key(|folder| folder.position);
+        Ok(folders)
+    }
+
+    pub fn recent_items(&self) -> impl Iterator<Item = &RecentItem> {
+        self.recent_items.iter()
+    }
+
+    pub fn recent_files(&self) -> impl Iterator<Item = &RecentItem> {
+        self.recent_items()
     }
 
     fn project(&self, id: ProjectId) -> Result<&Project, ExplorerError> {
@@ -1130,6 +1496,34 @@ impl Workspace {
         }
     }
 
+    fn ensure_folders_tab(
+        &self,
+        project_id: ProjectId,
+        tab_id: TabId,
+    ) -> Result<(), ExplorerError> {
+        self.ensure_tab_belongs_to_project(project_id, tab_id)?;
+        if self.tab(tab_id)?.kind() == TabKind::Folders {
+            Ok(())
+        } else {
+            Err(ExplorerError::WrongTabKind {
+                tab_id,
+                expected: TabKind::Folders,
+            })
+        }
+    }
+
+    fn ensure_folder_belongs_to_tab(
+        &self,
+        tab_id: TabId,
+        folder_id: FolderItemId,
+    ) -> Result<(), ExplorerError> {
+        self.folders
+            .iter()
+            .find(|folder| folder.id == folder_id && folder.tab_id == tab_id)
+            .map(|_| ())
+            .ok_or(ExplorerError::FolderItemNotFound(folder_id))
+    }
+
     fn ensure_link_belongs_to_tab(
         &self,
         tab_id: TabId,
@@ -1145,7 +1539,7 @@ impl Workspace {
     fn folder_tab_mut(&mut self, tab_id: TabId) -> Result<&mut FolderTabState, ExplorerError> {
         match &mut self.tab_mut(tab_id)?.content {
             TabContent::Folder(state) => Ok(state),
-            TabContent::Links(_) => Err(ExplorerError::WrongTabKind {
+            TabContent::Folders(_) | TabContent::Links(_) => Err(ExplorerError::WrongTabKind {
                 tab_id,
                 expected: TabKind::Folder,
             }),
@@ -1155,9 +1549,19 @@ impl Workspace {
     fn links_tab_mut(&mut self, tab_id: TabId) -> Result<&mut LinksTabState, ExplorerError> {
         match &mut self.tab_mut(tab_id)?.content {
             TabContent::Links(state) => Ok(state),
-            TabContent::Folder(_) => Err(ExplorerError::WrongTabKind {
+            TabContent::Folder(_) | TabContent::Folders(_) => Err(ExplorerError::WrongTabKind {
                 tab_id,
                 expected: TabKind::Links,
+            }),
+        }
+    }
+
+    fn folders_tab_mut(&mut self, tab_id: TabId) -> Result<&mut FoldersTabState, ExplorerError> {
+        match &mut self.tab_mut(tab_id)?.content {
+            TabContent::Folders(state) => Ok(state),
+            TabContent::Folder(_) | TabContent::Links(_) => Err(ExplorerError::WrongTabKind {
+                tab_id,
+                expected: TabKind::Folders,
             }),
         }
     }
@@ -1201,13 +1605,82 @@ fn normalize_link(name: String, url: String) -> Result<(String, String), Explore
     Ok((name, url))
 }
 
-fn same_path(left: &Path, right: &Path) -> bool {
-    left == right
+fn normalize_folder(name: String, path: String) -> Result<(String, PathBuf), ExplorerError> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(ExplorerError::InvalidFolderPath);
+    }
+    let path = PathBuf::from(path);
+    let name = trim_required(name)
+        .or_else(|| {
+            path.file_name()
+                .map(|value| value.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| path.to_string_lossy().into_owned());
+    Ok((name, path))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folders_tab_stores_named_paths_selection_and_checked_items() {
+        let mut workspace = Workspace::new();
+        let project_id = workspace.create_project("A", "Alpha").unwrap();
+        let tab_id = workspace.add_folders_tab(project_id, "Folders").unwrap();
+        let ids = workspace
+            .add_folders(
+                project_id,
+                tab_id,
+                vec![
+                    ("".into(), r"C:\work\docs".into()),
+                    ("Assets".into(), r"C:\work\assets".into()),
+                ],
+            )
+            .unwrap();
+        workspace
+            .select_folder_item(project_id, tab_id, Some(ids[1]))
+            .unwrap();
+        workspace
+            .update_checked_folders(project_id, tab_id, ids.clone())
+            .unwrap();
+
+        let tab = workspace.tabs_for_project(project_id).unwrap()[0];
+        assert_eq!(tab.kind(), TabKind::Folders);
+        assert_eq!(tab.folders().unwrap().selected_folder_id, Some(ids[1]));
+        assert_eq!(
+            workspace.folders_for_tab(project_id, tab_id).unwrap()[0].name,
+            "docs"
+        );
+    }
+
+    #[test]
+    fn deleting_multiple_folders_is_one_undoable_operation() {
+        let mut workspace = Workspace::new();
+        let project_id = workspace.create_project("A", "Alpha").unwrap();
+        let tab_id = workspace.add_folders_tab(project_id, "Folders").unwrap();
+        let ids = workspace
+            .add_folders(
+                project_id,
+                tab_id,
+                vec![("A".into(), r"C:\a".into()), ("B".into(), r"C:\b".into())],
+            )
+            .unwrap();
+        workspace.delete_folders(project_id, tab_id, &ids).unwrap();
+        assert_eq!(workspace.undo_kind(), Some(UndoKind::DeleteFolder));
+        assert!(
+            workspace
+                .folders_for_tab(project_id, tab_id)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(workspace.undo_last());
+        assert_eq!(
+            workspace.folders_for_tab(project_id, tab_id).unwrap().len(),
+            2
+        );
+    }
 
     #[test]
     fn links_tab_stores_editable_links_and_selection_per_tab() {
@@ -1459,7 +1932,7 @@ mod tests {
 
         let paths = workspace
             .recent_files()
-            .map(|file| file.path.clone())
+            .map(|item| PathBuf::from(&item.target))
             .collect::<Vec<_>>();
         assert_eq!(
             paths,
@@ -1477,11 +1950,18 @@ mod tests {
         let first = workspace.add_tab(project_id, "First", r"C:\work").unwrap();
         let second = workspace.add_tab(project_id, "Second", r"C:\work").unwrap();
 
-        workspace.record_opened_file(project_id, first, r"C:\work\a.txt").unwrap();
-        workspace.record_opened_file(project_id, second, r"C:\work\a.txt").unwrap();
+        workspace
+            .record_opened_file(project_id, first, r"C:\work\a.txt")
+            .unwrap();
+        workspace
+            .record_opened_file(project_id, second, r"C:\work\a.txt")
+            .unwrap();
 
         assert_eq!(
-            workspace.recent_files().map(|file| file.tab_id).collect::<Vec<_>>(),
+            workspace
+                .recent_files()
+                .map(|file| file.tab_id)
+                .collect::<Vec<_>>(),
             vec![second, first]
         );
     }
@@ -1493,12 +1973,39 @@ mod tests {
         let tab_id = workspace.add_tab(project_id, "Files", r"C:\work").unwrap();
 
         workspace
-            .record_opened_item(project_id, tab_id, r"C:\work\assets", true)
+            .record_opened_folder(project_id, tab_id, r"C:\work\assets")
             .unwrap();
 
         let recent = workspace.recent_files().next().unwrap();
-        assert!(recent.is_dir);
-        assert_eq!(recent.path, PathBuf::from(r"C:\work\assets"));
+        assert_eq!(recent.kind, RecentItemKind::Folder);
+        assert_eq!(recent.target, r"C:\work\assets");
+    }
+
+    #[test]
+    fn opened_link_keeps_its_display_snapshot_and_deduplicates_by_url() {
+        let mut workspace = Workspace::new();
+        let project_id = workspace.create_project("A", "Alpha").unwrap();
+        let tab_id = workspace.add_links_tab(project_id, "Links").unwrap();
+        let link_id = LinkId::from_value(42);
+
+        workspace
+            .record_opened_link(project_id, tab_id, link_id, "Old", "https://example.com")
+            .unwrap();
+        workspace
+            .record_opened_link(
+                project_id,
+                tab_id,
+                link_id,
+                "Example",
+                "https://example.com",
+            )
+            .unwrap();
+
+        let recent = workspace.recent_items().collect::<Vec<_>>();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].kind, RecentItemKind::Link);
+        assert_eq!(recent[0].label, "Example");
+        assert_eq!(recent[0].link_id, Some(link_id));
     }
 
     #[test]
@@ -1575,7 +2082,7 @@ mod tests {
         assert_eq!(
             restored
                 .recent_files()
-                .map(|file| file.path.clone())
+                .map(|item| PathBuf::from(&item.target))
                 .collect::<Vec<_>>(),
             vec![
                 PathBuf::from(r"C:\work\a\notes\todo.md"),
@@ -1752,10 +2259,16 @@ mod tests {
         let mut workspace = Workspace::new();
         let project_id = workspace.create_project("A", "Alpha").unwrap();
         let ids = (0..6)
-            .map(|index| workspace.add_tab(project_id, format!("Tab {index}"), "").unwrap())
+            .map(|index| {
+                workspace
+                    .add_tab(project_id, format!("Tab {index}"), "")
+                    .unwrap()
+            })
             .collect::<Vec<_>>();
 
-        workspace.move_tabs(project_id, &[ids[1], ids[3]], 5).unwrap();
+        workspace
+            .move_tabs(project_id, &[ids[1], ids[3]], 5)
+            .unwrap();
 
         let ordered = workspace
             .tabs_for_project(project_id)
@@ -1763,7 +2276,10 @@ mod tests {
             .iter()
             .map(|tab| tab.id)
             .collect::<Vec<_>>();
-        assert_eq!(ordered, vec![ids[0], ids[2], ids[4], ids[5], ids[1], ids[3]]);
+        assert_eq!(
+            ordered,
+            vec![ids[0], ids[2], ids[4], ids[5], ids[1], ids[3]]
+        );
     }
 
     #[test]
@@ -1813,7 +2329,7 @@ mod tests {
         assert_eq!(
             workspace
                 .recent_files()
-                .map(|file| file.path.clone())
+                .map(|item| PathBuf::from(&item.target))
                 .collect::<Vec<_>>(),
             vec![PathBuf::from(r"C:\b\src\b.txt")]
         );
@@ -1884,7 +2400,7 @@ mod tests {
         assert_eq!(
             workspace
                 .recent_files()
-                .map(|file| file.path.clone())
+                .map(|item| PathBuf::from(&item.target))
                 .collect::<Vec<_>>(),
             vec![PathBuf::from(r"C:\a\docs\a.txt")]
         );
@@ -2038,5 +2554,28 @@ mod tests {
         assert_eq!(workspace.tabs_for_project(first).unwrap().len(), 1);
         assert_eq!(workspace.notes_for_project(third).unwrap().len(), 1);
         assert!(!workspace.can_undo());
+    }
+
+    #[test]
+    fn opened_registered_folder_keeps_its_identity_in_recent_items() {
+        let mut workspace = Workspace::new();
+        let project_id = workspace.create_project("A", "").unwrap();
+        let tab_id = workspace.add_folders_tab(project_id, "Folders").unwrap();
+        let folder_id = workspace
+            .add_folders(
+                project_id,
+                tab_id,
+                vec![("Docs".to_string(), r"C:\work\docs".to_string())],
+            )
+            .unwrap()[0];
+
+        workspace
+            .record_opened_folder_item(project_id, tab_id, folder_id, "Docs", r"C:\work\docs")
+            .unwrap();
+
+        let recent = workspace.recent_items().next().unwrap();
+        assert_eq!(recent.kind, RecentItemKind::Folder);
+        assert_eq!(recent.folder_id, Some(folder_id));
+        assert_eq!(recent.link_id, None);
     }
 }

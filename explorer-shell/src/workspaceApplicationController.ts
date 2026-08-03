@@ -11,6 +11,7 @@ type ProjectCommands<TWorkspace> = {
 type TabCommands<TWorkspace> = {
   addFolder: (projectId: number, name: string, folderPath: string) => Promise<TWorkspace>;
   addLinks: (projectId: number, name: string) => Promise<TWorkspace>;
+  addFolders: (projectId: number, name: string) => Promise<TWorkspace>;
   activate: (projectId: number, tabId: number) => Promise<TWorkspace>;
   rename: (projectId: number, tabId: number, name: string) => Promise<TWorkspace>;
   updateFolder: (projectId: number, tabId: number, name: string, folderPath: string) => Promise<TWorkspace>;
@@ -81,6 +82,10 @@ export class WorkspaceApplicationController<TWorkspace> {
 
   addLinksTab(projectId: number, name: string): Promise<TWorkspace> {
     return this.#replace(this.#services().tabs.addLinks(projectId, name));
+  }
+
+  addFoldersTab(projectId: number, name: string): Promise<TWorkspace> {
+    return this.#replace(this.#services().tabs.addFolders(projectId, name));
   }
 
   activateTab(projectId: number, tabId: number): Promise<TWorkspace> {

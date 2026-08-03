@@ -8,12 +8,14 @@ import {
 export type HeaderProject = { id: number; name: string; summary: string };
 export type HeaderTab =
   | { id: number; name: string; kind: "folder"; folder_path: string }
-  | { id: number; name: string; kind: "links" };
+  | { id: number; name: string; kind: "links" }
+  | { id: number; name: string; kind: "folders" };
 
 export type ActiveHeaderState = {
   project: HeaderProject | null;
   tab: HeaderTab | null;
   linksCount: number;
+  foldersCount: number;
   inlineEdit: InlineEditState;
   projectEditSurface: "active-header" | "project-list";
   tabNameEditSurface: "tab-bar" | "active-header";
@@ -38,6 +40,8 @@ export class ActiveHeaderRenderer {
     openFolderButton: HTMLButtonElement;
     addLinkButton: HTMLButtonElement;
     addLinksButton: HTMLButtonElement;
+    addFolderButton: HTMLButtonElement;
+    addFoldersButton: HTMLButtonElement;
   }) {}
 
   render(state: ActiveHeaderState, actions: ActiveHeaderActions): void {
@@ -56,14 +60,21 @@ export class ActiveHeaderRenderer {
       actions,
     );
     const linksMode = state.tab?.kind === "links";
-    this.elements.tabKindLabel.textContent = linksMode ? "Links:" : "Folder:";
-    this.elements.openFolderButton.hidden = linksMode;
+    const foldersMode = state.tab?.kind === "folders";
+    this.elements.tabKindLabel.textContent = linksMode ? "Links:" : foldersMode ? "Folders:" : "Folder:";
+    this.elements.openFolderButton.hidden = linksMode || foldersMode;
     this.elements.addLinkButton.hidden = !linksMode;
     this.elements.addLinksButton.hidden = !linksMode;
+    this.elements.addFolderButton.hidden = !foldersMode;
+    this.elements.addFoldersButton.hidden = !foldersMode;
     this.elements.openFolderButton.disabled = state.tab?.kind !== "folder" || !state.tab.folder_path;
     this.#renderTabName(state, actions);
     if (linksMode) {
       this.elements.tabPath.textContent = `${state.linksCount} link${state.linksCount === 1 ? "" : "s"}`;
+      this.elements.tabPath.classList.remove("inline-editable-empty");
+      this.elements.tabPath.title = "";
+    } else if (foldersMode) {
+      this.elements.tabPath.textContent = `${state.foldersCount} folder${state.foldersCount === 1 ? "" : "s"}`;
       this.elements.tabPath.classList.remove("inline-editable-empty");
       this.elements.tabPath.title = "";
     } else {

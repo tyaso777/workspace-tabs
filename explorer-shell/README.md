@@ -23,7 +23,7 @@ Tauri Desktop版とLocal Web版で共有するVanilla TypeScript UIです。実�
 
 ## Tab
 
-- 追加: Tab列末尾の`+`からFolder TabまたはLinks Tabを選択
+- 追加: Tab列末尾の`+`からFolder Tab、Folders Tab、Links Tabを選択
 - 名前変更: TabまたはActive Tab名をダブルクリック
 - 複数選択: Ctrl／Shiftクリック
 - 並び替え: 1件または複数選択したTabをドラッグ
@@ -45,6 +45,15 @@ Tauri Desktop版とLocal Web版で共有するVanilla TypeScript UIです。実�
 - 行クリックで選択、チェックボックスまたはCtrl／Shiftクリックで複数チェック
 - `Open`／`Copy`、ダブルクリック編集、右クリックメニュー
 - Checked URLの右クリック`Open N Links`でまとめて開く
+
+## Folders Tab
+
+- `Add Folder`: 表示名とフォルダパスを1件追加。`Choose`も利用可能
+- `Add Folders`: `表示名: C:\path`またはパスだけを1行ずつ一括追加
+- 行クリックで選択、チェックボックスまたはCtrlクリックで複数チェック
+- `Open`／`Copy`、ダブルクリック編集、右クリックメニュー
+- Checked行の右クリック`Open N Folders`でまとめて開く
+- Deleteは登録だけを削除し、実フォルダやファイルは削除しない。Undo可能
 
 ## 開発
 

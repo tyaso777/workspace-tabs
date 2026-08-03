@@ -1,6 +1,7 @@
 import {
   Check as CheckIcon,
   Folder as FolderIcon,
+  Folders as FoldersIcon,
   Link as LinkIcon,
   createElement as createLucideElement,
 } from "lucide";
@@ -21,7 +22,7 @@ import { tabKindLabel } from "./tabMenu";
 export type TabBarItem = {
   id: number;
   name: string;
-  kind: "folder" | "links";
+  kind: "folder" | "links" | "folders";
 };
 
 type EditSurface = "tab-bar" | "active-header";
@@ -194,7 +195,7 @@ export class TabBarRenderer {
       button.type = "button";
       button.className = "tab-button";
       button.title = `${tabKindLabel(tab.kind)}: ${tab.name}`;
-      const icon = createLucideElement(tab.kind === "folder" ? FolderIcon : LinkIcon, {
+      const icon = createLucideElement(tab.kind === "folder" ? FolderIcon : tab.kind === "links" ? LinkIcon : FoldersIcon, {
         width: 16,
         height: 16,
         class: "tab-kind-icon",

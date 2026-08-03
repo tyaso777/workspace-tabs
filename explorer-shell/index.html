@@ -95,6 +95,10 @@
                 <strong>Folder</strong>
                 <span>Browse files in a folder</span>
               </button>
+              <button id="add-folders-tab-button" type="button" role="menuitem">
+                <strong>Folders</strong>
+                <span>Save and open multiple folders</span>
+              </button>
               <button id="add-links-tab-button" type="button" role="menuitem">
                 <strong>Links</strong>
                 <span>Save and open web links</span>
@@ -114,6 +118,8 @@
                 <button id="open-folder-button" type="button">Open Folder</button>
                 <button id="add-link-button" type="button" hidden>Add Link</button>
                 <button id="add-links-button" type="button" hidden>Add Links</button>
+                <button id="add-folder-button" type="button" hidden>Add Folder</button>
+                <button id="add-folders-button" type="button" hidden>Add Folders</button>
               </div>
             </div>
             <div id="file-list" class="file-list"></div>
@@ -190,6 +196,15 @@
       <div class="context-menu-separator" role="separator"></div>
       <button id="delete-link-menu-button" type="button" class="project-menu-danger" role="menuitem">Delete Link</button>
     </div>
+    <div id="folder-context-menu" class="project-context-menu" role="menu" hidden>
+      <button id="edit-folder-name-menu-button" type="button" role="menuitem">Edit Name</button>
+      <button id="edit-folder-path-menu-button" type="button" role="menuitem">Edit Path</button>
+      <button id="choose-folder-path-menu-button" type="button" role="menuitem">Choose Folder...</button>
+      <button id="open-folder-shortcut-menu-button" type="button" role="menuitem">Open</button>
+      <button id="copy-folder-path-menu-button" type="button" role="menuitem">Copy Path</button>
+      <div class="context-menu-separator" role="separator"></div>
+      <button id="delete-folder-menu-button" type="button" class="project-menu-danger" role="menuitem">Delete Folder</button>
+    </div>
     <dialog id="add-link-dialog" class="confirmation-dialog add-links-dialog">
       <form method="dialog">
         <h3>Add Link</h3>
@@ -229,6 +244,51 @@
         <div class="confirmation-actions">
           <button type="submit" value="cancel">Cancel</button>
           <button id="confirm-delete-link-button" type="button" class="danger-button">Delete Link</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="add-folder-dialog" class="confirmation-dialog add-links-dialog">
+      <form method="dialog">
+        <h3>Add Folder</h3>
+        <div class="link-dialog-fields">
+          <label for="add-folder-name">Display name <span>(optional)</span></label>
+          <input id="add-folder-name" type="text" autocomplete="off" />
+          <label for="add-folder-path">Folder path</label>
+          <div class="folder-dialog-path-row">
+            <input id="add-folder-path" type="text" autocomplete="off" />
+            <button id="choose-add-folder-button" type="button">Choose</button>
+          </div>
+        </div>
+        <p id="add-folder-error" class="dialog-error" hidden></p>
+        <div class="confirmation-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button id="confirm-add-folder-button" type="button">Add Folder</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="add-folders-dialog" class="confirmation-dialog add-links-dialog">
+      <form method="dialog">
+        <h3>Add Folders</h3>
+        <label for="add-folders-input">Folders <span>(one per line)</span></label>
+        <textarea id="add-folders-input" rows="8" wrap="soft"></textarea>
+        <div class="link-input-example">
+          <strong>Example:</strong>
+          <code>Documents: C:\Users\me\Documents<br />D:\Shared</code>
+        </div>
+        <p id="add-folders-error" class="dialog-error" hidden></p>
+        <div class="confirmation-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button id="confirm-add-folders-button" type="button">Add Folders</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="delete-folder-dialog" class="confirmation-dialog">
+      <form method="dialog">
+        <h3 id="delete-folder-dialog-title">Delete folder registration?</h3>
+        <p id="delete-folder-dialog-detail"></p>
+        <div class="confirmation-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button id="confirm-delete-folder-button" type="button" class="danger-button">Delete Folder</button>
         </div>
       </form>
     </dialog>

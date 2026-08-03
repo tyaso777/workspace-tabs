@@ -1,5 +1,6 @@
 use explorer_core::{
-    Project, ProjectLink, ProjectNote, ProjectTab, RestoredSession, TabContent, UndoKind, Workspace,
+    Project, ProjectFolder, ProjectLink, ProjectNote, ProjectTab, RestoredSession, TabContent,
+    UndoKind, Workspace,
 };
 use serde::Serialize;
 
@@ -43,6 +44,10 @@ pub enum TabContentDto {
         selected_link_id: Option<u64>,
         checked_link_ids: Vec<u64>,
     },
+    Folders {
+        selected_folder_id: Option<u64>,
+        checked_folder_ids: Vec<u64>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -55,11 +60,23 @@ pub struct LinkDto {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct RecentFileDto {
+pub struct FolderDto {
+    pub id: u64,
+    pub tab_id: u64,
+    pub name: String,
+    pub path: String,
+    pub position: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecentItemDto {
     pub project_id: u64,
     pub tab_id: u64,
-    pub path: String,
-    pub is_dir: bool,
+    pub kind: String,
+    pub target: String,
+    pub label: String,
+    pub link_id: Option<u64>,
+    pub folder_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -75,7 +92,8 @@ pub struct WorkspaceDto {
     pub tabs: Vec<TabDto>,
     pub notes: Vec<NoteDto>,
     pub links: Vec<LinkDto>,
-    pub recent_files: Vec<RecentFileDto>,
+    pub folders: Vec<FolderDto>,
+    pub recent_items: Vec<RecentItemDto>,
     pub restored_session: Option<SessionDto>,
     pub can_undo: bool,
     pub undo_kind: Option<String>,
@@ -107,13 +125,33 @@ pub fn workspace_to_dto(workspace: &Workspace) -> WorkspaceDto {
                 .map(link_to_dto)
         })
         .collect();
-    let recent_files = workspace
-        .recent_files()
-        .map(|file| RecentFileDto {
-            project_id: file.project_id.value(),
-            tab_id: file.tab_id.value(),
-            path: path_to_string(&file.path),
-            is_dir: file.is_dir,
+    let folders = workspace
+        .projects()
+        .iter()
+        .flat_map(|project| workspace.tabs_for_project(project.id).unwrap_or_default())
+        .flat_map(|tab| {
+            workspace
+                .folders_for_tab(tab.project_id, tab.id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(folder_to_dto)
+        })
+        .collect();
+    let recent_items = workspace
+        .recent_items()
+        .map(|item| RecentItemDto {
+            project_id: item.project_id.value(),
+            tab_id: item.tab_id.value(),
+            kind: match item.kind {
+                explorer_core::RecentItemKind::File => "file",
+                explorer_core::RecentItemKind::Folder => "folder",
+                explorer_core::RecentItemKind::Link => "link",
+            }
+            .to_string(),
+            target: item.target.clone(),
+            label: item.label.clone(),
+            link_id: item.link_id.map(|id| id.value()),
+            folder_id: item.folder_id.map(|id| id.value()),
         })
         .collect();
     WorkspaceDto {
@@ -121,7 +159,8 @@ pub fn workspace_to_dto(workspace: &Workspace) -> WorkspaceDto {
         tabs,
         notes,
         links,
-        recent_files,
+        folders,
+        recent_items,
         restored_session: workspace.restore_last_session().map(session_to_dto),
         can_undo: workspace.can_undo(),
         undo_kind: workspace.undo_kind().map(undo_kind_to_string),
@@ -134,6 +173,7 @@ fn undo_kind_to_string(kind: UndoKind) -> String {
         UndoKind::DeleteTab => "delete_tab".to_string(),
         UndoKind::DeleteNote => "delete_note".to_string(),
         UndoKind::DeleteLink => "delete_link".to_string(),
+        UndoKind::DeleteFolder => "delete_folder".to_string(),
     }
 }
 
@@ -191,7 +231,25 @@ fn tab_to_dto(tab: &ProjectTab) -> TabDto {
                 selected_link_id: state.selected_link_id.map(|id| id.value()),
                 checked_link_ids: state.checked_link_ids.iter().map(|id| id.value()).collect(),
             },
+            TabContent::Folders(state) => TabContentDto::Folders {
+                selected_folder_id: state.selected_folder_id.map(|id| id.value()),
+                checked_folder_ids: state
+                    .checked_folder_ids
+                    .iter()
+                    .map(|id| id.value())
+                    .collect(),
+            },
         },
+    }
+}
+
+fn folder_to_dto(folder: &ProjectFolder) -> FolderDto {
+    FolderDto {
+        id: folder.id.value(),
+        tab_id: folder.tab_id.value(),
+        name: folder.name.clone(),
+        path: path_to_string(&folder.path),
+        position: folder.position,
     }
 }
 
@@ -219,6 +277,7 @@ mod tests {
         let project_id = workspace.create_project("Project", "").unwrap();
         let folder_id = workspace.add_tab(project_id, "Folder", r"C:\docs").unwrap();
         let links_id = workspace.add_links_tab(project_id, "Links").unwrap();
+        let folders_id = workspace.add_folders_tab(project_id, "Folders").unwrap();
         let value = serde_json::to_value(workspace_to_dto(&workspace)).unwrap();
         let tabs = value["tabs"].as_array().unwrap();
         let folder = tabs
@@ -229,11 +288,18 @@ mod tests {
             .iter()
             .find(|tab| tab["id"] == links_id.value())
             .unwrap();
+        let folders = tabs
+            .iter()
+            .find(|tab| tab["id"] == folders_id.value())
+            .unwrap();
         assert_eq!(folder["kind"], "folder");
         assert!(folder.get("folder_path").is_some());
         assert!(folder.get("selected_link_id").is_none());
         assert_eq!(links["kind"], "links");
         assert!(links.get("selected_link_id").is_some());
         assert!(links.get("folder_path").is_none());
+        assert_eq!(folders["kind"], "folders");
+        assert!(folders.get("selected_folder_id").is_some());
+        assert!(folders.get("folder_path").is_none());
     }
 }

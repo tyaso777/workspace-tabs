@@ -9,6 +9,7 @@ describe("tabsApi", () => {
 
     await api.addFolder(2, "Folder", "C:\\work");
     await api.addLinks(2, "Links");
+    await api.addFolders(2, "Folders");
     await api.activate(2, 7);
     await api.rename(2, 7, "Renamed");
     await api.updateFolder(2, 7, "Work", "C:\\next");
@@ -18,6 +19,7 @@ describe("tabsApi", () => {
     expect(invoke.mock.calls).toEqual([
       ["add_tab", { projectId: 2, name: "Folder", folderPath: "C:\\work" }],
       ["add_links_tab", { projectId: 2, name: "Links" }],
+      ["add_folders_tab", { projectId: 2, name: "Folders" }],
       ["activate_tab", { projectId: 2, tabId: 7 }],
       ["update_tab_name", { projectId: 2, tabId: 7, name: "Renamed" }],
       ["update_tab", { projectId: 2, tabId: 7, name: "Work", folderPath: "C:\\next" }],

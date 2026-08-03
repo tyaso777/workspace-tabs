@@ -14,7 +14,7 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use explorer_core::{LinkId, NoteId, ProjectId, TabId, Workspace};
+use explorer_core::{FolderItemId, LinkId, NoteId, ProjectId, TabId, Workspace};
 use explorer_view_model::workspace_to_dto;
 use futures_util::stream::unfold;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
@@ -487,16 +487,24 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
                 .map_err(err)?;
             Ok(Value::Null)
         }
-        "load_notes_custom_height" => to_value(lock(&state.store)?.load_notes_custom_height().map_err(err)?),
+        "load_notes_custom_height" => to_value(
+            lock(&state.store)?
+                .load_notes_custom_height()
+                .map_err(err)?,
+        ),
         "save_notes_custom_height" => {
             lock(&state.store)?
                 .save_notes_custom_height(optional_u32_arg(&args, "height")?)
                 .map_err(err)?;
             Ok(Value::Null)
         }
-        "load_notes_maximized" => to_value(lock(&state.store)?.load_notes_maximized().map_err(err)?),
+        "load_notes_maximized" => {
+            to_value(lock(&state.store)?.load_notes_maximized().map_err(err)?)
+        }
         "save_notes_maximized" => {
-            lock(&state.store)?.save_notes_maximized(bool_arg(&args, "maximized")?).map_err(err)?;
+            lock(&state.store)?
+                .save_notes_maximized(bool_arg(&args, "maximized")?)
+                .map_err(err)?;
             Ok(Value::Null)
         }
         "create_project" => mutate_workspace(state, |workspace| {
@@ -597,6 +605,15 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
                 .map(|_| ())
                 .map_err(err)
         }),
+        "add_folders_tab" => mutate_workspace(state, |workspace| {
+            workspace
+                .add_folders_tab(
+                    ProjectId::from_value(u64_arg(&args, "projectId")?),
+                    string_arg(&args, "name")?,
+                )
+                .map(|_| ())
+                .map_err(err)
+        }),
         "update_tab_name" => mutate_workspace(state, |workspace| {
             workspace
                 .update_tab_name(
@@ -614,6 +631,71 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
                     link_inputs_arg(&args)?,
                 )
                 .map(|_| ())
+                .map_err(err)
+        }),
+        "add_folders" => mutate_workspace(state, |workspace| {
+            workspace
+                .add_folders(
+                    ProjectId::from_value(u64_arg(&args, "projectId")?),
+                    TabId::from_value(u64_arg(&args, "tabId")?),
+                    folder_inputs_arg(&args)?,
+                )
+                .map(|_| ())
+                .map_err(err)
+        }),
+        "update_folder_item" => mutate_workspace(state, |workspace| {
+            workspace
+                .update_folder_item(
+                    ProjectId::from_value(u64_arg(&args, "projectId")?),
+                    TabId::from_value(u64_arg(&args, "tabId")?),
+                    FolderItemId::from_value(u64_arg(&args, "folderId")?),
+                    string_arg(&args, "name")?,
+                    string_arg(&args, "path")?,
+                )
+                .map_err(err)
+        }),
+        "select_folder_item" => mutate_workspace(state, |workspace| {
+            workspace
+                .select_folder_item(
+                    ProjectId::from_value(u64_arg(&args, "projectId")?),
+                    TabId::from_value(u64_arg(&args, "tabId")?),
+                    optional_u64_arg(&args, "folderId")?.map(FolderItemId::from_value),
+                )
+                .map_err(err)
+        }),
+        "update_checked_folders" => mutate_workspace(state, |workspace| {
+            workspace
+                .update_checked_folders(
+                    ProjectId::from_value(u64_arg(&args, "projectId")?),
+                    TabId::from_value(u64_arg(&args, "tabId")?),
+                    u64_vec_arg(&args, "folderIds")?
+                        .into_iter()
+                        .map(FolderItemId::from_value)
+                        .collect(),
+                )
+                .map_err(err)
+        }),
+        "delete_folders" => mutate_workspace(state, |workspace| {
+            let folder_ids = u64_vec_arg(&args, "folderIds")?
+                .into_iter()
+                .map(FolderItemId::from_value)
+                .collect::<Vec<_>>();
+            workspace
+                .delete_folders(
+                    ProjectId::from_value(u64_arg(&args, "projectId")?),
+                    TabId::from_value(u64_arg(&args, "tabId")?),
+                    &folder_ids,
+                )
+                .map_err(err)
+        }),
+        "move_folder" => mutate_workspace(state, |workspace| {
+            workspace
+                .move_folder(
+                    ProjectId::from_value(u64_arg(&args, "projectId")?),
+                    TabId::from_value(u64_arg(&args, "tabId")?),
+                    FolderItemId::from_value(u64_arg(&args, "folderId")?),
+                    usize_arg(&args, "targetIndex")?,
+                )
                 .map_err(err)
         }),
         "update_link" => mutate_workspace(state, |workspace| {
@@ -790,7 +872,9 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
                     return Err("Recent tab no longer exists".to_string());
                 }
                 open_path(&path)?;
-                workspace.record_opened_file(project_id, tab_id, path).map_err(err)
+                workspace
+                    .record_opened_file(project_id, tab_id, path)
+                    .map_err(err)
             })
         }
         "open_folder" => {
@@ -818,7 +902,36 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
                     return Err("Recent tab no longer exists".to_string());
                 }
                 open_path(&path)?;
-                workspace.record_opened_item(project_id, tab_id, path, true).map_err(err)
+                workspace
+                    .record_opened_folder(project_id, tab_id, path)
+                    .map_err(err)
+            })
+        }
+        "open_folder_shortcut" => {
+            let project_id = ProjectId::from_value(u64_arg(&args, "projectId")?);
+            let tab_id = TabId::from_value(u64_arg(&args, "tabId")?);
+            let folder_id = FolderItemId::from_value(u64_arg(&args, "folderId")?);
+            mutate_workspace(state, |workspace| {
+                let folder = workspace
+                    .folders_for_tab(project_id, tab_id)
+                    .map_err(err)?
+                    .into_iter()
+                    .find(|folder| folder.id == folder_id)
+                    .cloned()
+                    .ok_or_else(|| "Folder registration no longer exists".to_string())?;
+                if !folder.path.is_dir() {
+                    return Err(format!("not a folder: '{}'", folder.path.display()));
+                }
+                open_path(&folder.path)?;
+                workspace
+                    .record_opened_folder_item(
+                        project_id,
+                        tab_id,
+                        folder_id,
+                        folder.name,
+                        folder.path,
+                    )
+                    .map_err(err)
             })
         }
         "open_url" => {
@@ -826,6 +939,28 @@ fn invoke_command(state: &AppState, command: &str, args: Value) -> Result<Value,
             validate_http_url(&url)?;
             open::that(url).map_err(err)?;
             Ok(Value::Null)
+        }
+        "open_link" => {
+            let project_id = ProjectId::from_value(u64_arg(&args, "projectId")?);
+            let tab_id = TabId::from_value(u64_arg(&args, "tabId")?);
+            let link_id = LinkId::from_value(u64_arg(&args, "linkId")?);
+            let label = string_arg(&args, "label")?;
+            let url = string_arg(&args, "url")?;
+            validate_http_url(&url)?;
+            mutate_workspace(state, |workspace| {
+                if !workspace
+                    .tabs_for_project(project_id)
+                    .map_err(err)?
+                    .iter()
+                    .any(|tab| tab.id == tab_id)
+                {
+                    return Err("Recent tab no longer exists".to_string());
+                }
+                open::that(&url).map_err(err)?;
+                workspace
+                    .record_opened_link(project_id, tab_id, link_id, label, url)
+                    .map_err(err)
+            })
         }
         "open_storage_folder" => {
             let database_path = PathBuf::from(&state.storage_info.database_path);
@@ -1080,7 +1215,9 @@ fn u32_arg(args: &Value, key: &str) -> Result<u32, String> {
 fn optional_u32_arg(args: &Value, key: &str) -> Result<Option<u32>, String> {
     match args.get(key) {
         None | Some(Value::Null) => Ok(None),
-        Some(value) => value.as_u64().map(|value| Some(value as u32))
+        Some(value) => value
+            .as_u64()
+            .map(|value| Some(value as u32))
             .ok_or_else(|| format!("invalid {key}")),
     }
 }
@@ -1111,6 +1248,15 @@ fn link_inputs_arg(args: &Value) -> Result<Vec<(String, String)>, String> {
         .ok_or_else(|| "argument must be an array: links".to_string())?
         .iter()
         .map(|link| Ok((string_arg(link, "name")?, string_arg(link, "url")?)))
+        .collect()
+}
+
+fn folder_inputs_arg(args: &Value) -> Result<Vec<(String, String)>, String> {
+    value_arg(args, "folders")?
+        .as_array()
+        .ok_or_else(|| "argument must be an array: folders".to_string())?
+        .iter()
+        .map(|folder| Ok((string_arg(folder, "name")?, string_arg(folder, "path")?)))
         .collect()
 }
 

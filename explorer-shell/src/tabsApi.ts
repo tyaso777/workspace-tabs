@@ -11,6 +11,9 @@ export function createTabsApi<TWorkspace>(invoke: InvokeTabsCommand<TWorkspace>)
     addLinks(projectId: number, name: string): Promise<TWorkspace> {
       return invoke("add_links_tab", { projectId, name });
     },
+    addFolders(projectId: number, name: string): Promise<TWorkspace> {
+      return invoke("add_folders_tab", { projectId, name });
+    },
     activate(projectId: number, tabId: number): Promise<TWorkspace> {
       return invoke("activate_tab", { projectId, tabId });
     },

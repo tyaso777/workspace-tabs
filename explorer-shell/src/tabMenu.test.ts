@@ -32,10 +32,16 @@ describe("tab delete confirmation", () => {
     ).toEqual({
       title: "Delete 2 tabs?",
       detail:
-        "Tabs: Docs, Research. Saved tab state and links will be removed from WorkspaceTabs. Files and folders will not be deleted.",
+        "Tabs: Docs, Research. Saved tab state, links, and folder registrations will be removed from WorkspaceTabs. Files and folders will not be deleted.",
     });
     expect(tabDeleteMenuLabel(2)).toBe("Delete 2 Tabs");
     expect(tabDeleteMenuLabel(1)).toBe("Delete Tab");
+  });
+
+  it("explains that a Folders tab deletion only removes registrations", () => {
+    expect(tabDeleteConfirmation("Places", "folders").detail).toBe(
+      "Saved folder registrations and tab state will be removed from WorkspaceTabs. Files and folders will not be deleted.",
+    );
   });
 });
 

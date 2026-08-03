@@ -1,6 +1,6 @@
 # WorkspaceTabs
 
-Windows上のフォルダ、ファイル、URL、メモをProject単位でまとめるワークスペース管理アプリです。Projectごとに複数のFolder／Links Tabを持ち、作業状態をSQLiteへ保存します。
+Windows上のフォルダ、ファイル、URL、メモをProject単位でまとめるワークスペース管理アプリです。Projectごとに複数のFolder／Folders／Links Tabを持ち、作業状態をSQLiteへ保存します。
 
 ## 実行方式
 
@@ -46,9 +46,19 @@ DesktopとLocal Webを同じSQLiteに対して同時起動することはでき�
 - 選択、チェック、表示順をSQLiteへ保存
 - 登録可能なURLは`http://`と`https://`
 
+### Folders Tab
+
+- 表示名とフォルダパスを1件追加する`Add Folder`
+- `表示名: C:\path`またはパスだけを1行ずつ入力する`Add Folders`
+- 登録行のOpen／Copy Path
+- 表示名とパスのダブルクリック編集、右クリック編集、フォルダ選択ダイアログ
+- Ctrlクリックとチェックボックスによる複数チェック、一括Open／Delete
+- 登録の削除確認とUndo。実フォルダやファイルは削除しない
+- 選択、チェック、表示順、最近開いたフォルダをSQLiteへ保存
+
 ### Tabと復元
 
-- `+`からFolder TabまたはLinks Tabを追加
+- `+`からFolder Tab、Folders Tab、Links Tabを追加
 - Tab名とFolder Pathの編集
 - TabのCtrl／Shift複数選択、ドラッグ並び替え、一括削除
 - Tab削除は右クリックメニューから確認後に実行し、Undo可能
@@ -142,11 +152,11 @@ GitHub ActionsのCIはpush／pull requestで同じFrontend・Rust・Local Web E2
 
 ## 内部設計
 
-- `explorer-core`: Project、Tab、Note、Link、Undoなどのドメイン状態
+- `explorer-core`: Project、Tab、Note、Link、Folder登録、Undoなどのドメイン状態
 - `explorer-view-model`: Desktop／Local Web共通のJSON表現
 - `explorer-shell`: Vanilla TypeScript UIとTauri Desktop
 - `local-web`: localhost HTTP API、SSE、ブラウザライフサイクル
-- SQLiteでは共通Tab情報とFolder／Links固有状態を分離して保存
+- SQLiteでは共通Tab情報とFolder／Folders／Links固有状態を分離して保存
 
 詳細な画面操作は[explorer-shell/README.md](explorer-shell/README.md)を参照してください。
 

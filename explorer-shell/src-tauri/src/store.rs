@@ -1,6 +1,7 @@
 use explorer_core::{
-    FolderTabState, LinkId, LinksTabState, NoteId, Project, ProjectId, ProjectLink, ProjectNote,
-    ProjectTab, RecentFile, TabContent, TabId, TabKind, Workspace, WorkspaceSnapshot,
+    FolderItemId, FolderTabState, FoldersTabState, LinkId, LinksTabState, NoteId, Project,
+    ProjectFolder, ProjectId, ProjectLink, ProjectNote, ProjectTab, RecentItem, RecentItemKind,
+    TabContent, TabId, TabKind, Workspace, WorkspaceSnapshot,
 };
 use rusqlite::{params, Connection};
 use std::path::{Path, PathBuf};
@@ -33,8 +34,9 @@ impl SqliteWorkspaceStore {
         let projects = self.load_projects()?;
         let tabs = self.load_tabs()?;
         let links = self.load_links()?;
+        let folders = self.load_folders()?;
         let notes = self.load_notes()?;
-        let recent_files = self.load_recent_files()?;
+        let recent_items = self.load_recent_items()?;
         let active_project_id = self.load_active_project_id()?;
 
         Ok(Workspace::from_snapshot(WorkspaceSnapshot {
@@ -52,7 +54,8 @@ impl SqliteWorkspaceStore {
             tabs,
             notes,
             links,
-            recent_files,
+            folders,
+            recent_items,
             active_project_id,
         }))
     }
@@ -61,12 +64,15 @@ impl SqliteWorkspaceStore {
         let tx = self.conn.transaction()?;
         let snapshot = workspace.snapshot();
 
-        tx.execute("DELETE FROM recent_files", [])?;
+        tx.execute("DELETE FROM recent_items", [])?;
+        tx.execute("DELETE FROM tab_checked_folders", [])?;
+        tx.execute("DELETE FROM project_folders", [])?;
         tx.execute("DELETE FROM tab_checked_links", [])?;
         tx.execute("DELETE FROM project_links", [])?;
         tx.execute("DELETE FROM tab_checked_files", [])?;
         tx.execute("DELETE FROM folder_tabs", [])?;
         tx.execute("DELETE FROM links_tabs", [])?;
+        tx.execute("DELETE FROM folders_tabs", [])?;
         tx.execute("DELETE FROM tabs", [])?;
         tx.execute("DELETE FROM project_notes", [])?;
         tx.execute("DELETE FROM projects", [])?;
@@ -142,6 +148,15 @@ impl SqliteWorkspaceStore {
                         ],
                     )?;
                 }
+                TabContent::Folders(state) => {
+                    tx.execute(
+                        "INSERT INTO folders_tabs (tab_id, selected_folder_id) VALUES (?1, ?2)",
+                        params![
+                            tab.id.value() as i64,
+                            state.selected_folder_id.map(|id| id.value() as i64)
+                        ],
+                    )?;
+                }
             }
         }
 
@@ -155,6 +170,20 @@ impl SqliteWorkspaceStore {
                     link.name,
                     link.url,
                     link.position as i64
+                ],
+            )?;
+        }
+
+        for folder in &snapshot.folders {
+            tx.execute(
+                "INSERT INTO project_folders (id, tab_id, name, path, position)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    folder.id.value() as i64,
+                    folder.tab_id.value() as i64,
+                    folder.name,
+                    path_to_string(&folder.path),
+                    folder.position as i64
                 ],
             )?;
         }
@@ -174,16 +203,34 @@ impl SqliteWorkspaceStore {
             }
         }
 
-        for (position, file) in snapshot.recent_files.iter().enumerate() {
+        for tab in &snapshot.tabs {
+            let Some(state) = tab.folders() else { continue };
+            for (position, folder_id) in state.checked_folder_ids.iter().enumerate() {
+                tx.execute(
+                    "INSERT INTO tab_checked_folders (tab_id, position, folder_id)
+                     VALUES (?1, ?2, ?3)",
+                    params![
+                        tab.id.value() as i64,
+                        position as i64,
+                        folder_id.value() as i64
+                    ],
+                )?;
+            }
+        }
+
+        for (position, item) in snapshot.recent_items.iter().enumerate() {
             tx.execute(
-                "INSERT INTO recent_files (position, project_id, tab_id, path, is_dir)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO recent_items (position, project_id, tab_id, kind, target, label, link_id, folder_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     position as i64,
-                    file.project_id.value() as i64,
-                    file.tab_id.value() as i64,
-                    path_to_string(&file.path),
-                    file.is_dir
+                    item.project_id.value() as i64,
+                    item.tab_id.value() as i64,
+                    recent_kind_to_string(item.kind),
+                    item.target,
+                    item.label,
+                    item.link_id.map(|id| id.value() as i64),
+                    item.folder_id.map(|id| id.value() as i64)
                 ],
             )?;
         }
@@ -307,7 +354,10 @@ impl SqliteWorkspaceStore {
                 params![height.to_string()],
             )?;
         } else {
-            self.conn.execute("DELETE FROM app_state WHERE key = 'notes_custom_height'", [])?;
+            self.conn.execute(
+                "DELETE FROM app_state WHERE key = 'notes_custom_height'",
+                [],
+            )?;
         }
         Ok(())
     }
@@ -363,12 +413,21 @@ impl SqliteWorkspaceStore {
                 FOREIGN KEY(tab_id) REFERENCES tabs(id)
             );
 
-            CREATE TABLE IF NOT EXISTS recent_files (
+            CREATE TABLE IF NOT EXISTS folders_tabs (
+                tab_id INTEGER PRIMARY KEY,
+                selected_folder_id INTEGER,
+                FOREIGN KEY(tab_id) REFERENCES tabs(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS recent_items (
                 position INTEGER PRIMARY KEY,
                 project_id INTEGER NOT NULL,
                 tab_id INTEGER NOT NULL,
-                path TEXT NOT NULL,
-                is_dir INTEGER NOT NULL DEFAULT 0,
+                kind TEXT NOT NULL,
+                target TEXT NOT NULL,
+                label TEXT NOT NULL,
+                link_id INTEGER,
+                folder_id INTEGER,
                 FOREIGN KEY(project_id) REFERENCES projects(id)
             );
 
@@ -398,43 +457,51 @@ impl SqliteWorkspaceStore {
                 FOREIGN KEY(link_id) REFERENCES project_links(id)
             );
 
+            CREATE TABLE IF NOT EXISTS project_folders (
+                id INTEGER PRIMARY KEY,
+                tab_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                path TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                FOREIGN KEY(tab_id) REFERENCES tabs(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS tab_checked_folders (
+                tab_id INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                folder_id INTEGER NOT NULL,
+                PRIMARY KEY (tab_id, position),
+                FOREIGN KEY(tab_id) REFERENCES tabs(id),
+                FOREIGN KEY(folder_id) REFERENCES project_folders(id)
+            );
+
             CREATE TABLE IF NOT EXISTS app_state (
                 key TEXT PRIMARY KEY,
                 value TEXT
             );
             ",
         )?;
-        self.normalize_recent_files_table()?;
+        self.normalize_recent_items_table()?;
         self.normalize_legacy_tabs_table()?;
         self.create_tab_kind_triggers()?;
         self.conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         Ok(())
     }
 
-    fn normalize_recent_files_table(&self) -> Result<(), StoreError> {
-        let columns = self.table_columns("recent_files")?;
-        if columns.iter().any(|name| name == "tab_id") {
-            if !columns.iter().any(|name| name == "is_dir") {
-                self.conn.execute(
-                    "ALTER TABLE recent_files ADD COLUMN is_dir INTEGER NOT NULL DEFAULT 0",
-                    [],
-                )?;
-            }
-            return Ok(());
-        }
-        self.conn.execute_batch(
-            "
-            DROP TABLE recent_files;
-            CREATE TABLE recent_files (
-                position INTEGER PRIMARY KEY,
-                project_id INTEGER NOT NULL,
-                tab_id INTEGER NOT NULL,
-                path TEXT NOT NULL,
-                is_dir INTEGER NOT NULL DEFAULT 0,
-                FOREIGN KEY(project_id) REFERENCES projects(id)
-            );
-            ",
+    fn normalize_recent_items_table(&self) -> Result<(), StoreError> {
+        let old_table_exists: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'recent_files')",
+            [],
+            |row| row.get(0),
         )?;
+        if old_table_exists {
+            self.conn.execute("DROP TABLE recent_files", [])?;
+        }
+        let columns = self.table_columns("recent_items")?;
+        if !columns.iter().any(|name| name == "folder_id") {
+            self.conn
+                .execute("ALTER TABLE recent_items ADD COLUMN folder_id INTEGER", [])?;
+        }
         Ok(())
     }
 
@@ -453,6 +520,13 @@ impl SqliteWorkspaceStore {
             WHEN COALESCE((SELECT kind FROM tabs WHERE id = NEW.tab_id), '') <> 'links'
             BEGIN
                 SELECT RAISE(ABORT, 'links state requires a links tab');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS folders_tabs_require_folders_kind
+            BEFORE INSERT ON folders_tabs
+            WHEN COALESCE((SELECT kind FROM tabs WHERE id = NEW.tab_id), '') <> 'folders'
+            BEGIN
+                SELECT RAISE(ABORT, 'folders state requires a folders tab');
             END;
             ",
         )?;
@@ -550,8 +624,10 @@ impl SqliteWorkspaceStore {
     fn load_tabs(&self) -> Result<Vec<ProjectTab>, StoreError> {
         let checked_paths = self.load_checked_paths_by_tab()?;
         let checked_link_ids = self.load_checked_link_ids_by_tab()?;
+        let checked_folder_ids = self.load_checked_folder_ids_by_tab()?;
         let folder_states = self.load_folder_states(checked_paths)?;
         let links_states = self.load_links_states(checked_link_ids)?;
+        let folders_states = self.load_folders_states(checked_folder_ids)?;
         let mut statement = self.conn.prepare(
             "SELECT id, project_id, name, position, kind
              FROM tabs ORDER BY project_id ASC, position ASC, id ASC",
@@ -576,6 +652,12 @@ impl SqliteWorkspaceStore {
                             checked_link_ids: Vec::new(),
                         }))
                     }
+                    TabKind::Folders => TabContent::Folders(
+                        folders_states.get(&id).cloned().unwrap_or(FoldersTabState {
+                            selected_folder_id: None,
+                            checked_folder_ids: Vec::new(),
+                        }),
+                    ),
                 },
                 position: row.get::<_, i64>(3)? as usize,
             })
@@ -626,6 +708,31 @@ impl SqliteWorkspaceStore {
         Ok(collect_rows(rows)?.into_iter().collect())
     }
 
+    fn load_folders_states(
+        &self,
+        checked_folder_ids: std::collections::HashMap<TabId, Vec<FolderItemId>>,
+    ) -> Result<std::collections::HashMap<TabId, FoldersTabState>, StoreError> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT tab_id, selected_folder_id FROM folders_tabs ORDER BY tab_id")?;
+        let rows = statement.query_map([], |row| {
+            let tab_id = TabId::from_value(row.get::<_, i64>(0)? as u64);
+            Ok((
+                tab_id,
+                FoldersTabState {
+                    selected_folder_id: row
+                        .get::<_, Option<i64>>(1)?
+                        .map(|id| FolderItemId::from_value(id as u64)),
+                    checked_folder_ids: checked_folder_ids
+                        .get(&tab_id)
+                        .cloned()
+                        .unwrap_or_default(),
+                },
+            ))
+        })?;
+        Ok(collect_rows(rows)?.into_iter().collect())
+    }
+
     fn load_checked_paths_by_tab(
         &self,
     ) -> Result<std::collections::HashMap<TabId, Vec<PathBuf>>, StoreError> {
@@ -670,6 +777,29 @@ impl SqliteWorkspaceStore {
         Ok(checked)
     }
 
+    fn load_checked_folder_ids_by_tab(
+        &self,
+    ) -> Result<std::collections::HashMap<TabId, Vec<FolderItemId>>, StoreError> {
+        let mut statement = self.conn.prepare(
+            "SELECT tab_id, folder_id FROM tab_checked_folders ORDER BY tab_id ASC, position ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                TabId::from_value(row.get::<_, i64>(0)? as u64),
+                FolderItemId::from_value(row.get::<_, i64>(1)? as u64),
+            ))
+        })?;
+        let mut checked = std::collections::HashMap::new();
+        for row in rows {
+            let (tab_id, folder_id) = row?;
+            checked
+                .entry(tab_id)
+                .or_insert_with(Vec::new)
+                .push(folder_id);
+        }
+        Ok(checked)
+    }
+
     fn load_links(&self) -> Result<Vec<ProjectLink>, StoreError> {
         let mut statement = self.conn.prepare(
             "SELECT id, tab_id, name, url, position
@@ -687,16 +817,40 @@ impl SqliteWorkspaceStore {
         collect_rows(rows)
     }
 
-    fn load_recent_files(&self) -> Result<Vec<RecentFile>, StoreError> {
+    fn load_folders(&self) -> Result<Vec<ProjectFolder>, StoreError> {
+        let mut statement = self.conn.prepare(
+            "SELECT id, tab_id, name, path, position
+             FROM project_folders ORDER BY tab_id ASC, position ASC, id ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(ProjectFolder {
+                id: FolderItemId::from_value(row.get::<_, i64>(0)? as u64),
+                tab_id: TabId::from_value(row.get::<_, i64>(1)? as u64),
+                name: row.get(2)?,
+                path: PathBuf::from(row.get::<_, String>(3)?),
+                position: row.get::<_, i64>(4)? as usize,
+            })
+        })?;
+        collect_rows(rows)
+    }
+
+    fn load_recent_items(&self) -> Result<Vec<RecentItem>, StoreError> {
         let mut statement = self
             .conn
-            .prepare("SELECT project_id, tab_id, path, is_dir FROM recent_files ORDER BY position ASC")?;
+            .prepare("SELECT project_id, tab_id, kind, target, label, link_id, folder_id FROM recent_items ORDER BY position ASC")?;
         let rows = statement.query_map([], |row| {
-            Ok(RecentFile {
+            Ok(RecentItem {
                 project_id: ProjectId::from_value(row.get::<_, i64>(0)? as u64),
                 tab_id: TabId::from_value(row.get::<_, i64>(1)? as u64),
-                path: PathBuf::from(row.get::<_, String>(2)?),
-                is_dir: row.get(3)?,
+                kind: recent_kind_from_string(&row.get::<_, String>(2)?),
+                target: row.get(3)?,
+                label: row.get(4)?,
+                link_id: row
+                    .get::<_, Option<i64>>(5)?
+                    .map(|id| LinkId::from_value(id as u64)),
+                folder_id: row
+                    .get::<_, Option<i64>>(6)?
+                    .map(|id| FolderItemId::from_value(id as u64)),
             })
         })?;
         collect_rows(rows)
@@ -766,14 +920,31 @@ fn tab_kind_to_string(kind: TabKind) -> &'static str {
     match kind {
         TabKind::Folder => "folder",
         TabKind::Links => "links",
+        TabKind::Folders => "folders",
     }
 }
 
 fn tab_kind_from_string(value: &str) -> TabKind {
-    if value == "links" {
-        TabKind::Links
-    } else {
-        TabKind::Folder
+    match value {
+        "links" => TabKind::Links,
+        "folders" => TabKind::Folders,
+        _ => TabKind::Folder,
+    }
+}
+
+fn recent_kind_to_string(kind: RecentItemKind) -> &'static str {
+    match kind {
+        RecentItemKind::File => "file",
+        RecentItemKind::Folder => "folder",
+        RecentItemKind::Link => "link",
+    }
+}
+
+fn recent_kind_from_string(value: &str) -> RecentItemKind {
+    match value {
+        "folder" => RecentItemKind::Folder,
+        "link" => RecentItemKind::Link,
+        _ => RecentItemKind::File,
     }
 }
 
@@ -794,6 +965,49 @@ impl<T> OptionalRow<T> for rusqlite::Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folders_tab_round_trips_with_items_selection_checks_and_recent_identity() {
+        let mut store = SqliteWorkspaceStore::in_memory().unwrap();
+        let mut workspace = Workspace::new();
+        let project_id = workspace.create_project("Research", "").unwrap();
+        let tab_id = workspace.add_folders_tab(project_id, "Folders").unwrap();
+        let folder_ids = workspace
+            .add_folders(
+                project_id,
+                tab_id,
+                vec![
+                    ("Docs".to_string(), r"C:\work\docs".to_string()),
+                    ("Shared".to_string(), r"D:\shared".to_string()),
+                ],
+            )
+            .unwrap();
+        workspace
+            .select_folder_item(project_id, tab_id, Some(folder_ids[1]))
+            .unwrap();
+        workspace
+            .update_checked_folders(project_id, tab_id, folder_ids.clone())
+            .unwrap();
+        workspace
+            .record_opened_folder_item(project_id, tab_id, folder_ids[0], "Docs", r"C:\work\docs")
+            .unwrap();
+
+        store.save_workspace(&workspace).unwrap();
+        let loaded = store.load_workspace().unwrap();
+
+        let tab = loaded.tabs_for_project(project_id).unwrap()[0];
+        assert_eq!(tab.kind(), TabKind::Folders);
+        assert_eq!(
+            tab.folders().unwrap().selected_folder_id,
+            Some(folder_ids[1])
+        );
+        assert_eq!(tab.folders().unwrap().checked_folder_ids, folder_ids);
+        assert_eq!(loaded.folders_for_tab(project_id, tab_id).unwrap().len(), 2);
+        assert_eq!(
+            loaded.recent_items().next().unwrap().folder_id,
+            Some(folder_ids[0])
+        );
+    }
 
     #[test]
     fn links_tab_round_trips_with_selected_and_checked_links() {
@@ -817,6 +1031,15 @@ mod tests {
         workspace
             .update_checked_links(project_id, tab_id, link_ids.clone())
             .unwrap();
+        workspace
+            .record_opened_link(
+                project_id,
+                tab_id,
+                link_ids[0],
+                "Rust",
+                "https://www.rust-lang.org/",
+            )
+            .unwrap();
 
         store.save_workspace(&workspace).unwrap();
         let loaded = store.load_workspace().unwrap();
@@ -826,6 +1049,10 @@ mod tests {
         assert_eq!(tab.links().unwrap().selected_link_id, Some(link_ids[1]));
         assert_eq!(tab.links().unwrap().checked_link_ids, link_ids);
         assert_eq!(loaded.links_for_tab(project_id, tab_id).unwrap().len(), 2);
+        let recent = loaded.recent_items().next().unwrap();
+        assert_eq!(recent.kind, RecentItemKind::Link);
+        assert_eq!(recent.label, "Rust");
+        assert_eq!(recent.link_id, Some(link_ids[0]));
     }
 
     #[test]
@@ -862,11 +1089,11 @@ mod tests {
         let tab_columns = store.table_columns("tabs").unwrap();
         assert!(!tab_columns.contains(&"folder_path".to_string()));
         assert!(!tab_columns.contains(&"selected_link_id".to_string()));
-        let recent_columns = store.table_columns("recent_files").unwrap();
-        assert!(recent_columns.contains(&"tab_id".to_string()));
+        let recent_columns = store.table_columns("recent_items").unwrap();
+        assert!(recent_columns.contains(&"kind".to_string()));
         let recent_count: i64 = store
             .conn
-            .query_row("SELECT COUNT(*) FROM recent_files", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM recent_items", [], |row| row.get(0))
             .unwrap();
         assert_eq!(recent_count, 0);
     }
@@ -882,7 +1109,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_adds_recent_item_kind_without_losing_current_recent_rows() {
+    fn migration_replaces_file_only_recent_history_with_general_items() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "
@@ -908,13 +1135,15 @@ mod tests {
 
         store.migrate().unwrap();
 
-        let row: (String, bool) = store
+        assert!(store
+            .table_columns("recent_items")
+            .unwrap()
+            .contains(&"target".to_string()));
+        let count: i64 = store
             .conn
-            .query_row("SELECT path, is_dir FROM recent_files", [], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })
+            .query_row("SELECT COUNT(*) FROM recent_items", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(row, (r"C:\docs\memo.txt".to_string(), false));
+        assert_eq!(count, 0);
     }
 
     #[test]
@@ -991,7 +1220,7 @@ mod tests {
         assert_eq!(
             loaded
                 .recent_files()
-                .map(|file| file.path.clone())
+                .map(|item| PathBuf::from(&item.target))
                 .collect::<Vec<_>>(),
             vec![
                 PathBuf::from(r"C:\work\a\docs\memo.md"),
@@ -1046,7 +1275,7 @@ mod tests {
             .unwrap();
         let recent_parent: String = store
             .conn
-            .query_row("PRAGMA foreign_key_list(recent_files)", [], |row| {
+            .query_row("PRAGMA foreign_key_list(recent_items)", [], |row| {
                 row.get(2)
             })
             .unwrap();
@@ -1201,8 +1430,12 @@ mod tests {
         let (project_id, tab_id) = {
             let mut store = SqliteWorkspaceStore::open(&database_path).unwrap();
             let mut workspace = Workspace::new();
-            let project_id = workspace.create_project("Persistent", "restart test").unwrap();
-            let tab_id = workspace.add_tab(project_id, "Docs", r"C:\work\docs").unwrap();
+            let project_id = workspace
+                .create_project("Persistent", "restart test")
+                .unwrap();
+            let tab_id = workspace
+                .add_tab(project_id, "Docs", r"C:\work\docs")
+                .unwrap();
             workspace.activate_tab(project_id, tab_id).unwrap();
             workspace
                 .select_path(project_id, tab_id, r"C:\work\docs\selected.txt")
@@ -1219,7 +1452,9 @@ mod tests {
             store.save_window_width(1280).unwrap();
             store.save_window_height(760).unwrap();
             store.save_project_sort_mode("custom").unwrap();
-            store.save_project_custom_order(&[project_id.value()]).unwrap();
+            store
+                .save_project_custom_order(&[project_id.value()])
+                .unwrap();
             store.save_sidebar_collapsed(true).unwrap();
             store.save_notes_custom_height(Some(325)).unwrap();
             store.save_notes_maximized(false).unwrap();

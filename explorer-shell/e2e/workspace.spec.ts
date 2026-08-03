@@ -106,11 +106,38 @@ test("creates, edits, switches, and reorders workspace tabs", async ({ page }) =
   await page.locator("#undo-button").click();
   await expect(page.locator(".link-row")).toHaveCount(2);
 
+  await page.locator("#add-tab-button").click();
+  await page.locator("#add-folders-tab-button").click();
+  await page.locator('input[data-inline-field="tabName"]').fill("Places");
+  await page.locator('input[data-inline-field="tabName"]').press("Enter");
+  const fixture = resolve(".e2e-runtime", "fixture");
+  await page.locator("#add-folder-button").click();
+  await page.locator("#add-folder-name").fill("Fixture");
+  await page.locator("#add-folder-path").fill(fixture);
+  await page.locator("#confirm-add-folder-button").click();
+  await page.locator("#add-folders-button").click();
+  await page.locator("#add-folders-input").fill(`Named: ${fixture}\\subfolder\nC:\\Temp`);
+  await page.locator("#confirm-add-folders-button").click();
+  await expect(page.locator(".folder-shortcut-row")).toHaveCount(3);
+  await page.locator(".folder-shortcut-row .file-check").nth(0).click();
+  await page.locator(".folder-shortcut-row .file-check").nth(1).click();
+  await page.locator(".folder-shortcut-row").first().click({ button: "right" });
+  await expect(page.locator("#open-folder-shortcut-menu-button")).toHaveText("Open 2 Folders");
+  await expect(page.locator("#delete-folder-menu-button")).toHaveText("Delete 2 Folders");
+  await page.locator("#delete-folder-menu-button").click();
+  await expect(page.locator("#delete-folder-dialog-detail")).toContainText(
+    "actual folders and files will not be deleted",
+  );
+  await page.locator("#confirm-delete-folder-button").click();
+  await expect(page.locator(".folder-shortcut-row")).toHaveCount(1);
+  await page.locator("#undo-button").click();
+  await expect(page.locator(".folder-shortcut-row")).toHaveCount(3);
+
   const bookmarksTab = page.locator(".tab-item").filter({ hasText: "Bookmarks" });
   await bookmarksTab.click({ button: "right" });
   await page.locator("#delete-tab-menu-button").click();
   await page.locator("#confirm-delete-tab-button").click();
-  await expect(page.locator(".tab-item")).toHaveCount(2);
+  await expect(page.locator(".tab-item")).toHaveCount(3);
 
   const defaultTab = page.locator(".tab-item").filter({ hasText: "New Tab" }).first();
   await defaultTab.locator(".tab-button").click();
@@ -127,9 +154,9 @@ test("creates, edits, switches, and reorders workspace tabs", async ({ page }) =
   await page.locator("#delete-tab-menu-button").click();
   await expect(page.locator("#delete-tab-dialog-title")).toHaveText("Delete 2 tabs?");
   await page.locator("#confirm-delete-tab-button").click();
-  await expect(page.locator(".tab-item")).toHaveCount(0);
+  await expect(page.locator(".tab-item")).toHaveCount(1);
   await page.locator("#undo-button").click();
-  await expect(page.locator(".tab-item")).toHaveCount(2);
+  await expect(page.locator(".tab-item")).toHaveCount(3);
 
   const editedProject = page.locator(".project-item").filter({ hasText: "Edited While Inactive" });
   await page.locator(".project-item").filter({ hasText: "First Project" }).click();
