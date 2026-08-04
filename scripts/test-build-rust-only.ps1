@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $scriptPath = Join-Path $PSScriptRoot 'build-rust-only.ps1'
+$manifestPath = Join-Path $PSScriptRoot '..\explorer-shell\src-tauri\Cargo.toml'
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("workspace-tabs-rust-only-test-" + [guid]::NewGuid())
 
 function Invoke-Validation {
@@ -15,6 +16,16 @@ function Invoke-Validation {
 }
 
 try {
+    $buildScript = Get-Content -LiteralPath $scriptPath -Raw
+    if ($buildScript -notmatch 'cargo build[^\r\n]+--features custom-protocol') {
+        throw 'Desktop Rust-only build does not enable the production custom protocol.'
+    }
+
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw
+    if ($manifest -notmatch 'custom-protocol\s*=\s*\[\s*"tauri/custom-protocol"\s*\]') {
+        throw 'Cargo manifest does not map custom-protocol to tauri/custom-protocol.'
+    }
+
     New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
     $missing = Join-Path $testRoot 'missing'
     if ((Invoke-Validation $missing) -eq 0) {

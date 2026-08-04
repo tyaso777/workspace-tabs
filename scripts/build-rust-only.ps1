@@ -58,7 +58,7 @@ function Invoke-Checked {
 
 function Build-Desktop {
     Invoke-Checked $root {
-        cargo build --release --locked --manifest-path explorer-shell/src-tauri/Cargo.toml
+        cargo build --release --locked --manifest-path explorer-shell/src-tauri/Cargo.toml --features custom-protocol
     }
     Copy-Item -LiteralPath (Join-Path $shell 'src-tauri\target\release\workspace-tabs.exe') `
         -Destination (Join-Path $outputs 'workspace-tabs.exe') -Force
