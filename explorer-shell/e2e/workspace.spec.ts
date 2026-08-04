@@ -90,7 +90,7 @@ test("creates, edits, switches, and reorders workspace tabs", async ({ page }) =
   await page.locator("#add-links-input").fill(
     "https://example.com\nhttps://example.org",
   );
-  await page.locator("#confirm-add-links-button").click();
+  await page.locator("#add-links-input").press("Control+Enter");
   await expect(page.locator(".link-row")).toHaveCount(2);
 
   await page.locator(".link-row .file-check").nth(0).click();
@@ -114,10 +114,10 @@ test("creates, edits, switches, and reorders workspace tabs", async ({ page }) =
   await page.locator("#add-folder-button").click();
   await page.locator("#add-folder-name").fill("Fixture");
   await page.locator("#add-folder-path").fill(fixture);
-  await page.locator("#confirm-add-folder-button").click();
+  await page.locator("#add-folder-path").press("Enter");
   await page.locator("#add-folders-button").click();
   await page.locator("#add-folders-input").fill(`Named: ${fixture}\\subfolder\nC:\\Temp`);
-  await page.locator("#confirm-add-folders-button").click();
+  await page.locator("#add-folders-input").press("Control+Enter");
   await expect(page.locator(".folder-shortcut-row")).toHaveCount(3);
   await page.locator(".folder-shortcut-row .file-check").nth(0).click();
   await page.locator(".folder-shortcut-row .file-check").nth(1).click();

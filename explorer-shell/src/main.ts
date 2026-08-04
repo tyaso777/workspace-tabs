@@ -62,6 +62,7 @@ import { bindProjectItemInteractions } from "./projectItemInteractions";
 import { createProjectMenuButton } from "./projectMenuButton";
 import { ProjectListRenderer } from "./projectListRenderer";
 import { DialogManager } from "./dialogManager";
+import { bindAddDialogSubmission } from "./addDialogSubmission";
 import { renderProjectListField as renderProjectListFieldElement } from "./projectListFieldRenderer";
 import {
   projectDeleteConfirmationForNames,
@@ -330,10 +331,12 @@ const addLinkName = element<HTMLInputElement>("#add-link-name");
 const addLinkUrl = element<HTMLTextAreaElement>("#add-link-url");
 const addLinkError = element<HTMLElement>("#add-link-error");
 const confirmAddLinkButton = element<HTMLButtonElement>("#confirm-add-link-button");
+const cancelAddLinkButton = element<HTMLButtonElement>("#cancel-add-link-button");
 const addLinksDialog = element<HTMLDialogElement>("#add-links-dialog");
 const addLinksInput = element<HTMLTextAreaElement>("#add-links-input");
 const addLinksError = element<HTMLElement>("#add-links-error");
 const confirmAddLinksButton = element<HTMLButtonElement>("#confirm-add-links-button");
+const cancelAddLinksButton = element<HTMLButtonElement>("#cancel-add-links-button");
 const deleteLinkDialog = element<HTMLDialogElement>("#delete-link-dialog");
 const deleteLinkDialogTitle = element<HTMLElement>("#delete-link-dialog-title");
 const deleteLinkDialogDetail = element<HTMLElement>("#delete-link-dialog-detail");
@@ -351,10 +354,12 @@ const addFolderPath = element<HTMLInputElement>("#add-folder-path");
 const addFolderError = element<HTMLElement>("#add-folder-error");
 const chooseAddFolderButton = element<HTMLButtonElement>("#choose-add-folder-button");
 const confirmAddFolderButton = element<HTMLButtonElement>("#confirm-add-folder-button");
+const cancelAddFolderButton = element<HTMLButtonElement>("#cancel-add-folder-button");
 const addFoldersDialog = element<HTMLDialogElement>("#add-folders-dialog");
 const addFoldersInput = element<HTMLTextAreaElement>("#add-folders-input");
 const addFoldersError = element<HTMLElement>("#add-folders-error");
 const confirmAddFoldersButton = element<HTMLButtonElement>("#confirm-add-folders-button");
+const cancelAddFoldersButton = element<HTMLButtonElement>("#cancel-add-folders-button");
 const deleteFolderDialog = element<HTMLDialogElement>("#delete-folder-dialog");
 const deleteFolderDialogTitle = element<HTMLElement>("#delete-folder-dialog-title");
 const deleteFolderDialogDetail = element<HTMLElement>("#delete-folder-dialog-detail");
@@ -582,13 +587,29 @@ function registerWorkspaceEvents() {
   openFolderButton.addEventListener("click", openActiveFolder);
   addLinkButton.addEventListener("click", showAddLinkDialog);
   addLinksButton.addEventListener("click", showAddLinksDialog);
-  confirmAddLinkButton.addEventListener("click", confirmAddLink);
-  confirmAddLinksButton.addEventListener("click", confirmAddLinks);
   addFolderButton.addEventListener("click", showAddFolderDialog);
   addFoldersButton.addEventListener("click", showAddFoldersDialog);
   chooseAddFolderButton.addEventListener("click", chooseFolderForAddDialog);
-  confirmAddFolderButton.addEventListener("click", confirmAddFolder);
-  confirmAddFoldersButton.addEventListener("click", confirmAddFolders);
+  bindAddDialogSubmission({
+    form: dialogForm(addLinkDialog), confirmButton: confirmAddLinkButton,
+    submit: confirmAddLink, enterControls: [addLinkName, addLinkUrl],
+  });
+  cancelAddLinkButton.addEventListener("click", () => dialogs.close("addLink"));
+  cancelAddLinksButton.addEventListener("click", () => dialogs.close("addLinks"));
+  cancelAddFolderButton.addEventListener("click", () => dialogs.close("addFolder"));
+  cancelAddFoldersButton.addEventListener("click", () => dialogs.close("addFolders"));
+  bindAddDialogSubmission({
+    form: dialogForm(addLinksDialog), confirmButton: confirmAddLinksButton,
+    submit: confirmAddLinks, enterControls: [addLinksInput], multiline: true,
+  });
+  bindAddDialogSubmission({
+    form: dialogForm(addFolderDialog), confirmButton: confirmAddFolderButton,
+    submit: confirmAddFolder, enterControls: [addFolderName, addFolderPath],
+  });
+  bindAddDialogSubmission({
+    form: dialogForm(addFoldersDialog), confirmButton: confirmAddFoldersButton,
+    submit: confirmAddFolders, enterControls: [addFoldersInput], multiline: true,
+  });
   openStorageFolderButton.addEventListener("click", openStorageFolder);
   sortCustomButton.addEventListener("click", () => setProjectSortMode("custom"));
   sortCreatedButton.addEventListener("click", () => setProjectSortMode("created"));
@@ -2725,4 +2746,10 @@ function element<T extends HTMLElement>(selector: string): T {
     throw new Error(`Missing element: ${selector}`);
   }
   return node;
+}
+
+function dialogForm(dialog: HTMLDialogElement): HTMLFormElement {
+  const form = dialog.querySelector<HTMLFormElement>("form");
+  if (!form) throw new Error(`Missing form in dialog: ${dialog.id}`);
+  return form;
 }

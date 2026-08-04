@@ -77,7 +77,7 @@ test("disconnects, restores persisted state after restart, and closes explicitly
     await page.locator("#add-link-button").click();
     await page.locator("#add-link-name").fill("Example");
     await page.locator("#add-link-url").fill("https://example.com");
-    await page.locator("#confirm-add-link-button").click();
+    await page.locator("#add-link-url").press("Enter");
     await expect(page.locator(".link-row")).toHaveCount(1);
 
     await stopProcess(process);
