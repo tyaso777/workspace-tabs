@@ -132,6 +132,37 @@ outputs/
   workspace-tabs-local-web.exe
 ```
 
+### npmがないWindows環境でのビルド
+
+FrontendとRustを別の環境でビルドできます。まず、Node.jsを利用できる環境でFrontendを生成します。
+
+```bash
+cd explorer-shell
+npm ci
+npm run test:ui
+npm run build
+```
+
+生成された`explorer-shell/dist`を、そのフォルダ構造のままWindows側の同じ場所へコピーします。GitHub Actionsの`WorkspaceTabs-frontend-dist` artifactをダウンロードした場合は、その中身を`explorer-shell/dist`へ配置します。Releaseの`WorkspaceTabs-frontend-dist.zip`には`dist`フォルダ自体が含まれるため、`explorer-shell`で展開します。
+
+Windows側にはRust stable、Microsoft C++ Build Tools、WebView2 Runtimeが必要です。Node.js、npm、Tauri CLIは不要です。
+
+```powershell
+# Frontend成果物だけを検査
+.\scripts\build-rust-only.cmd -ValidateOnly
+
+# Desktopのみ
+.\scripts\build-rust-only.cmd -Target desktop
+
+# Local Webのみ
+.\scripts\build-rust-only.cmd -Target local-web
+
+# 両方
+.\scripts\build-rust-only.cmd -Target all
+```
+
+`dist/index.html`、JavaScript、CSSが不足している場合は、Cargoを実行する前にエラーで停止します。生成したEXEは通常ビルドと同じく`outputs`へ配置されます。
+
 ## テスト
 
 ```powershell
@@ -142,13 +173,14 @@ npm.cmd run build
 npm.cmd run test:e2e
 
 cd ..
+.\scripts\test-build-rust-only.cmd
 cargo test --manifest-path explorer-core/Cargo.toml --locked
 cargo test --manifest-path explorer-view-model/Cargo.toml --locked
 cargo test --manifest-path explorer-shell/src-tauri/Cargo.toml --locked
 cargo test --manifest-path local-web/Cargo.toml --locked
 ```
 
-GitHub ActionsのCIはpush／pull requestで同じFrontend・Rust・Local Web E2Eを実行します。`v*`タグをpushすると、テスト成功後にWindows x64のEXEとPortable ZIPをGitHub Releaseへ公開します。Release workflowは手動実行もでき、その場合はartifactだけを生成します。
+GitHub ActionsのCIはpush／pull requestで同じFrontend・Rust・Local Web E2Eを実行し、npmなしのWindows環境へ渡せるFrontend artifactも生成します。`v*`タグをpushすると、テスト成功後にWindows x64のEXE、Portable ZIP、Frontend ZIPをGitHub Releaseへ公開します。Release workflowは手動実行もでき、その場合はartifactだけを生成します。
 
 ## 内部設計
 

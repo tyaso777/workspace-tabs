@@ -40,6 +40,8 @@ jobs:
       - name: Build frontend
         working-directory: explorer-shell
         run: npm run build
+      - name: Test npm-free build validation
+        run: .\scripts\test-build-rust-only.cmd
       - name: Install Playwright Chromium
         working-directory: explorer-shell
         run: npx playwright install chromium
@@ -55,3 +57,9 @@ jobs:
         run: cargo test --manifest-path explorer-shell/src-tauri/Cargo.toml --locked
       - name: Test Local Web
         run: cargo test --manifest-path local-web/Cargo.toml --locked
+      - name: Upload prebuilt frontend
+        uses: actions/upload-artifact@v4
+        with:
+          name: WorkspaceTabs-frontend-dist
+          path: explorer-shell/dist
+          if-no-files-found: error

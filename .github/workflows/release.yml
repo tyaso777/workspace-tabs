@@ -45,6 +45,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path outputs\data | Out-Null
           Compress-Archive -Path outputs\workspace-tabs.exe, outputs\workspace-tabs-local-web.exe, outputs\data -DestinationPath outputs\WorkspaceTabs-portable-windows-x64.zip -Force
+          Compress-Archive -Path explorer-shell\dist -DestinationPath outputs\WorkspaceTabs-frontend-dist.zip -Force
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -53,6 +54,7 @@ jobs:
             outputs/workspace-tabs.exe
             outputs/workspace-tabs-local-web.exe
             outputs/WorkspaceTabs-portable-windows-x64.zip
+            outputs/WorkspaceTabs-frontend-dist.zip
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -61,4 +63,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME outputs\workspace-tabs.exe outputs\workspace-tabs-local-web.exe outputs\WorkspaceTabs-portable-windows-x64.zip --verify-tag --generate-notes --title "WorkspaceTabs $env:GITHUB_REF_NAME"
+          gh release create $env:GITHUB_REF_NAME outputs\workspace-tabs.exe outputs\workspace-tabs-local-web.exe outputs\WorkspaceTabs-portable-windows-x64.zip outputs\WorkspaceTabs-frontend-dist.zip --verify-tag --generate-notes --title "WorkspaceTabs $env:GITHUB_REF_NAME"
