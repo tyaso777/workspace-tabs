@@ -14,9 +14,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 use store::SqliteWorkspaceStore;
-use tauri::{Emitter, LogicalSize, Manager, State, WindowEvent};
+use tauri::{image::Image, Emitter, LogicalSize, Manager, State, WindowEvent};
 
 const DEFAULT_TAB_NAME: &str = "New Tab";
+
+fn desktop_window_icon() -> tauri::Result<Image<'static>> {
+    Image::from_bytes(include_bytes!("../icons/icon.png"))
+}
 
 struct AppState {
     workspace: Mutex<Workspace>,
@@ -1152,6 +1156,7 @@ pub fn run() {
                 _instance_lock: instance_lock,
             });
             if let Some(window) = app.get_webview_window("main") {
+                window.set_icon(desktop_window_icon()?)?;
                 if saved_window_width.is_some() || saved_window_height.is_some() {
                     apply_window_size(&window, saved_window_width, saved_window_height);
                 }
@@ -1525,6 +1530,14 @@ mod tests {
     #[test]
     fn destroyed_main_window_requires_process_exit() {
         assert!(should_exit_after_window_event(&WindowEvent::Destroyed));
+    }
+
+    #[test]
+    fn desktop_window_icon_uses_the_current_png_asset() {
+        let icon = desktop_window_icon().unwrap();
+
+        assert_eq!((icon.width(), icon.height()), (512, 512));
+        assert_eq!(icon.rgba()[3], 0, "the outer corner should be transparent");
     }
 
     #[test]
