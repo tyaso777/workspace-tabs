@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { folderDialogDefaultPath, tabNameAfterFolderChange } from "./tabNaming";
+import { folderChooseAction, folderDialogDefaultPath, tabNameAfterFolderChange } from "./tabNaming";
 
 describe("tab naming", () => {
   it("uses the selected Windows folder name for a default New Tab", () => {
@@ -31,5 +31,14 @@ describe("tab naming", () => {
   it("omits the dialog default path when the tab has no folder", () => {
     expect(folderDialogDefaultPath("")).toBeUndefined();
     expect(folderDialogDefaultPath(null)).toBeUndefined();
+  });
+
+  it("applies a valid typed path instead of opening the chooser", () => {
+    expect(folderChooseAction("C:\\work\\client-a", true)).toBe("apply");
+  });
+
+  it("opens the chooser for an empty or invalid typed path", () => {
+    expect(folderChooseAction("", true)).toBe("choose");
+    expect(folderChooseAction("C:\\missing", false)).toBe("choose");
   });
 });

@@ -199,7 +199,8 @@ test("shows folder contents, previews files, and reacts to external changes", as
   const folderEditor = page.locator('input[data-inline-field="tabFolder"]');
   await expect(folderEditor).toBeVisible();
   await folderEditor.fill(fixture);
-  await folderEditor.press("Enter");
+  await page.locator("#active-tab-path .folder-inline-editor button").click();
+  await expect(folderEditor).toHaveCount(0);
 
   await expect(page.locator(".file-row")).toHaveCount(3);
   await expect(page.locator(".file-row.is-dir")).toHaveCount(1);

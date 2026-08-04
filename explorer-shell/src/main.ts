@@ -108,6 +108,7 @@ import {
 } from "./tabMenu";
 import {
   DEFAULT_TAB_NAME,
+  folderChooseAction,
   folderDialogDefaultPath,
   tabNameAfterFolderChange,
 } from "./tabNaming";
@@ -2273,7 +2274,15 @@ async function chooseFolderPath(defaultPath?: string) {
 async function chooseActiveTabFolder() {
   const tab = activeTab();
   if (tab?.kind !== "folder") return;
-  const selected = await chooseFolderPath(folderDialogDefaultPath(tab.folder_path));
+  const draft = viewStateController.state.inlineEdit.field === "tabFolder"
+    ? viewStateController.state.inlineEdit.draft.trim()
+    : "";
+  const validDraft = draft.length > 0 && await isValidFolderPath(draft);
+  if (folderChooseAction(draft, validDraft) === "apply") {
+    await commitTabInlineEdit(draft);
+    return;
+  }
+  const selected = await chooseFolderPath(folderDialogDefaultPath(draft || tab.folder_path));
   if (selected !== null) {
     viewStateController.state.inlineEdit = startTabFolderEditForChoice(tab.folder_path);
     await commitTabInlineEdit(selected);
@@ -2423,6 +2432,15 @@ function render() {
   renderNotes();
   renderTabs();
   renderFiles();
+}
+
+async function isValidFolderPath(folderPath: string) {
+  try {
+    await invoke<FileEntryDto[]>("list_folder", { folderPath });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function undoTooltip(kind: WorkspaceDto["undo_kind"]) {
